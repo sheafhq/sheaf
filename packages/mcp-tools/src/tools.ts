@@ -8,9 +8,28 @@
 import { verify } from "@sheafhq/verify";
 
 export type ToolContext = {
-  recorderUrl: string;
+  /** Primary + fallback recorder base URLs. First entry is reported as
+   *  `source_url` in responses. Fallback only kicks in on fetch error. */
+  recorderUrls: string[];
   baseRpc: string;
 };
+
+async function fetchWithFallback(
+  ctx: ToolContext,
+  path: string,
+  init?: RequestInit,
+): Promise<{ response: Response; sourceUrl: string }> {
+  let lastErr: unknown;
+  for (const base of ctx.recorderUrls) {
+    try {
+      const response = await fetch(base + path, init);
+      return { response, sourceUrl: base + path };
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw lastErr ?? new Error("no recorder URLs configured");
+}
 
 type ChainHead = {
   chain_id: string;
@@ -45,8 +64,10 @@ export async function chainHead(
   if (!args.chain_id || typeof args.chain_id !== "string") {
     throw new Error("chain_id (string) is required");
   }
-  const url = `${ctx.recorderUrl}/chains/${encodeURIComponent(args.chain_id)}/head`;
-  const r = await fetch(url);
+  const { response: r, sourceUrl } = await fetchWithFallback(
+    ctx,
+    `/chains/${encodeURIComponent(args.chain_id)}/head`,
+  );
   if (r.status === 404) {
     return {
       chain_id: args.chain_id,
@@ -65,7 +86,7 @@ export async function chainHead(
     event_count: body.event_count,
     created_at_unix: body.created_at,
     updated_at_unix: body.updated_at,
-    source_url: url,
+    source_url: sourceUrl,
   };
 }
 
@@ -80,8 +101,10 @@ export async function getProofFor(
     throw new Error("seq (non-negative integer) is required");
   }
   // First find out which epoch the event is in.
-  const evUrl = `${ctx.recorderUrl}/events/${encodeURIComponent(args.chain_id)}/${args.seq}`;
-  const evRes = await fetch(evUrl);
+  const { response: evRes } = await fetchWithFallback(
+    ctx,
+    `/events/${encodeURIComponent(args.chain_id)}/${args.seq}`,
+  );
   if (evRes.status === 404) {
     throw new Error(`no event at ${args.chain_id}/${args.seq}`);
   }
@@ -104,8 +127,10 @@ export async function getProofFor(
         "Event is signed and chained but not yet included in an on-chain anchor. Call again after the next epoch anchor to get a Merkle inclusion proof.",
     };
   }
-  const proofUrl = `${ctx.recorderUrl}/epoch/${ev.epoch_id}/proof/${encodeURIComponent(args.chain_id)}/${args.seq}`;
-  const proofRes = await fetch(proofUrl);
+  const { response: proofRes, sourceUrl } = await fetchWithFallback(
+    ctx,
+    `/epoch/${ev.epoch_id}/proof/${encodeURIComponent(args.chain_id)}/${args.seq}`,
+  );
   if (!proofRes.ok) {
     throw new Error(`recorder returned HTTP ${proofRes.status} on proof fetch`);
   }
@@ -121,7 +146,7 @@ export async function getProofFor(
     siblings: proof.siblings,
     anchor: proof.anchor,
     verification_note: proof.verification_note,
-    source_url: proofUrl,
+    source_url: sourceUrl,
   };
 }
 
@@ -203,7 +228,10 @@ export async function verifyBundle(
   // verification is self-contained; fall back to /.well-known if missing.
   let recorderKey = b.issuer?.public_key_base64 ?? "";
   if (!recorderKey) {
-    const r = await fetch(`${ctx.recorderUrl}/.well-known/sheaf-public-key`);
+    const { response: r } = await fetchWithFallback(
+      ctx,
+      `/.well-known/sheaf-public-key`,
+    );
     if (!r.ok) {
       throw new Error(
         `could not fetch recorder public key: HTTP ${r.status}`,
@@ -232,7 +260,7 @@ export async function verifyBundle(
     checks: result.checks,
     reason: result.reason,
     anchor_block: result.anchor_block,
-    recorder: ctx.recorderUrl,
+    recorder: ctx.recorderUrls[0],
     anchorer_checked: anchorer,
   };
 }

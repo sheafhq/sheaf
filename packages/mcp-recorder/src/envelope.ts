@@ -31,13 +31,35 @@ export class RecorderClient {
   }
 
   private debug(...args: unknown[]) {
-    if (this.cfg.logDebug) console.error("[arca]", ...args);
+    if (this.cfg.logDebug) console.error("[sheaf]", ...args);
+  }
+
+  /** Try the configured recorder URLs in order. Returns the first response
+   *  (including 4xx/5xx — those are real answers). Falls back only on fetch
+   *  errors (network, DNS, TLS). Throws the last error if all fail. */
+  private async fetchWithFallback(
+    path: string,
+    init?: RequestInit,
+  ): Promise<Response> {
+    let lastErr: unknown;
+    for (const base of this.cfg.recorderUrls) {
+      try {
+        return await fetch(base + path, init);
+      } catch (err) {
+        lastErr = err;
+        this.debug(
+          `fetch to ${base}${path} failed (${(err as Error).message}); trying next`,
+        );
+      }
+    }
+    throw lastErr ?? new Error("no recorder URLs configured");
   }
 
   private async fetchInitialState(): Promise<ChainState> {
     try {
-      const url = `${this.cfg.recorderUrl}/chains/${encodeURIComponent(this.cfg.chainId)}/head`;
-      const r = await fetch(url);
+      const r = await this.fetchWithFallback(
+        `/chains/${encodeURIComponent(this.cfg.chainId)}/head`,
+      );
       if (r.status === 404) {
         this.debug(`chain ${this.cfg.chainId} is new; starting at seq=0`);
         return { seq: 0, prev_hash: null };
@@ -109,7 +131,7 @@ export class RecorderClient {
       };
 
       const body = canonicalize(envelope);
-      const r = await fetch(`${this.cfg.recorderUrl}/events`, {
+      const r = await this.fetchWithFallback(`/events`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body,

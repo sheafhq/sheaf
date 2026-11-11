@@ -128,25 +128,42 @@ function normalize(bundle: unknown): {
   die("bundle shape not recognized (expected sheaf-bundle/1 or legacy)");
 }
 
+const DEFAULT_RECORDER_URLS = [
+  "https://api.sheafhq.io",
+  "https://sheaf-recorder.goldencalf.workers.dev",
+];
+
 async function resolveRecorderKey(
   bundle: BundleShape,
   args: Args,
 ): Promise<string> {
   if (args.recorderKey) return args.recorderKey;
   if (bundle.issuer?.public_key_base64) return bundle.issuer.public_key_base64;
-  const url =
-    (args.recorderUrl ??
-      "https://sheaf-recorder.goldencalf.workers.dev") +
-    "/.well-known/sheaf-public-key";
-  const r = await fetch(url);
-  if (!r.ok) die(`could not fetch recorder public key from ${url}: HTTP ${r.status}`);
-  const pk = (await r.json()) as {
-    active_key_id: string;
-    keys: Array<{ key_id: string; public_key_base64: string }>;
-  };
-  const active = pk.keys.find((k) => k.key_id === pk.active_key_id);
-  if (!active) die(`active recorder key not found in keyring at ${url}`);
-  return active.public_key_base64;
+  const urls = args.recorderUrl ? [args.recorderUrl] : DEFAULT_RECORDER_URLS;
+  let lastErr: unknown;
+  for (const base of urls) {
+    const url = base + "/.well-known/sheaf-public-key";
+    try {
+      const r = await fetch(url);
+      if (!r.ok) {
+        lastErr = new Error(`HTTP ${r.status} from ${url}`);
+        continue;
+      }
+      const pk = (await r.json()) as {
+        active_key_id: string;
+        keys: Array<{ key_id: string; public_key_base64: string }>;
+      };
+      const active = pk.keys.find((k) => k.key_id === pk.active_key_id);
+      if (!active) {
+        lastErr = new Error(`active recorder key not found in keyring at ${url}`);
+        continue;
+      }
+      return active.public_key_base64;
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  die(`could not fetch recorder public key: ${(lastErr as Error)?.message ?? "unknown error"}`);
 }
 
 async function main() {
