@@ -1,0 +1,28 @@
+# Dogfood: anchor every push to sheafhq/sheaf via Sheaf.
+# Creates a verifiable trail of this repo's own commits on Base mainnet.
+# Chain: gh-sheafhq-sheaf. Public verification: /c/gh-sheafhq-sheaf on
+# api.sheafhq.io. Badge pinned in README.md.
+
+name: Self-anchor
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  anchor:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Anchor on Sheaf
+        id: anchor
+        uses: ./packages/anchor-action
+        with:
+          api-key: ${{ secrets.SHEAF_API_KEY }}
+          intent: "sheafhq/sheaf commit"
+      - name: Echo
+        run: |
+          echo "Verify: ${{ steps.anchor.outputs.verify-url }}"
+          echo "Seq:    ${{ steps.anchor.outputs.sheaf-seq }}"
