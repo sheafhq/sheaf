@@ -12,11 +12,14 @@ import { buildBundle, BUNDLE_VERSION } from "./bundle.js";
 import { buildCreateAuthHeaders, extractPayer } from "./x402.js";
 import { VERIFY_HTML } from "./verify-page.js";
 import {
+  anchorLimitForPlan,
   createAccount,
+  currentMonth,
   getChainOwner,
   LEGACY_ACCOUNT_ID,
   lookupAccountByKey,
   parseBearer,
+  type Plan,
 } from "./accounts.js";
 import { renderChainPage, type ChainSummary } from "./chain-page.js";
 import { renderBadge } from "./badge.js";
@@ -514,6 +517,39 @@ app.post("/events", async (c) => {
     .bind(chain_id, seq, env_hash, nowSec, nowSec, chainAccountId)
     .run();
 
+  // WP3: flag quota status in the response header so the recorder client
+  // can emit a stderr warning at 80% / 100%. Reads the current month's
+  // usage for this (account, chain) tuple + looks up plan limit.
+  try {
+    const usageRow = (await c.env.DB.prepare(
+      "SELECT anchor_count FROM anchor_usage_monthly WHERE account_id = ? AND chain_id = ? AND month = ?",
+    )
+      .bind(chainAccountId, chain_id, currentMonth())
+      .first()) as { anchor_count: number } | null;
+    const accountRow = (await c.env.DB.prepare(
+      "SELECT plan FROM accounts WHERE account_id = ?",
+    )
+      .bind(chainAccountId)
+      .first()) as { plan: Plan } | null;
+    const plan = accountRow?.plan ?? "free";
+    const used = usageRow?.anchor_count ?? 0;
+    const limit = anchorLimitForPlan(plan);
+    if (used >= limit) {
+      c.header("x-sheaf-anchor-quota", "exceeded");
+      c.header(
+        "x-sheaf-anchor-usage",
+        `${used}/${limit === Number.MAX_SAFE_INTEGER ? "unlimited" : limit}`,
+      );
+    } else if (used >= limit * 0.8) {
+      c.header("x-sheaf-anchor-quota", "warning");
+      c.header("x-sheaf-anchor-usage", `${used}/${limit}`);
+    } else {
+      c.header("x-sheaf-anchor-usage", `${used}/${limit === Number.MAX_SAFE_INTEGER ? "unlimited" : limit}`);
+    }
+  } catch {
+    // Header-setting must never break event ingestion. Fail silent.
+  }
+
   const receipt: SubmissionReceipt = {
     ok: true,
     chain_id,
@@ -573,8 +609,22 @@ app.get("/events/:chain_id/:seq", async (c) => {
 // and stamps each event with (epoch_id, leaf_idx). Idempotent only in the
 // sense that if there are no un-anchored events it is a no-op; otherwise
 // each call creates exactly one new epoch.
+type SkippedChain = {
+  account_id: string;
+  chain_id: string;
+  plan: Plan;
+  current: number;
+  limit: number;
+};
 type AnchorFlowResult =
-  | { ok: true; epoch_id: number; merkle_root: string; event_count: number; anchor_tx_hash: string }
+  | {
+      ok: true;
+      epoch_id: number;
+      merkle_root: string;
+      event_count: number;
+      anchor_tx_hash: string;
+      skipped: SkippedChain[];
+    }
   | { ok: false; status: number; reason: string; detail?: unknown };
 
 async function anchorPending(env: Env): Promise<AnchorFlowResult> {
@@ -582,22 +632,76 @@ async function anchorPending(env: Env): Promise<AnchorFlowResult> {
   if (!env.ANCHORER_PRIVATE_KEY)
     return { ok: false, status: 500, reason: "ANCHORER_PRIVATE_KEY secret missing" };
 
+  const month = currentMonth();
+
+  // Fetch unanchored events joined with chain ownership + current month's
+  // anchor usage. Everything needed to decide which chains to include in
+  // this epoch.
   const unanchored = await env.DB.prepare(
-    `SELECT rowid AS rowid, chain_id, seq, envelope_hash, received_at
-     FROM events WHERE epoch_id IS NULL ORDER BY received_at, chain_id, seq`,
+    `SELECT e.rowid AS rowid, e.chain_id, e.seq, e.envelope_hash, e.received_at,
+            c.account_id, a.plan,
+            COALESCE((SELECT u.anchor_count FROM anchor_usage_monthly u
+                      WHERE u.account_id = c.account_id
+                        AND u.chain_id = e.chain_id
+                        AND u.month = ?), 0) AS current_anchors
+     FROM events e
+     JOIN chains c ON c.chain_id = e.chain_id
+     JOIN accounts a ON a.account_id = c.account_id
+     WHERE e.epoch_id IS NULL
+     ORDER BY e.received_at, e.chain_id, e.seq`,
   )
-    .bind()
+    .bind(month)
     .all();
 
-  const rows = unanchored.results as Array<{
+  type Row = {
     rowid: number;
     chain_id: string;
     seq: number;
     envelope_hash: string;
     received_at: number;
-  }>;
+    account_id: string;
+    plan: Plan;
+    current_anchors: number;
+  };
+  const rows = unanchored.results as Row[];
   if (rows.length === 0)
     return { ok: false, status: 200, reason: "no un-anchored events" };
+
+  // Decide quota per unique (account, chain). An over-cap chain is skipped
+  // entirely — its events stay un-anchored until the next month rollover
+  // or the operator upgrades.
+  const decisions = new Map<string, { include: boolean; plan: Plan; current: number; limit: number }>();
+  for (const r of rows) {
+    const key = `${r.account_id}::${r.chain_id}`;
+    if (decisions.has(key)) continue;
+    const limit = anchorLimitForPlan(r.plan);
+    decisions.set(key, {
+      include: r.current_anchors < limit,
+      plan: r.plan,
+      current: r.current_anchors,
+      limit,
+    });
+  }
+  const skipped: SkippedChain[] = [];
+  for (const [key, d] of decisions) {
+    if (!d.include) {
+      const [account_id, chain_id] = key.split("::");
+      skipped.push({ account_id: account_id!, chain_id: chain_id!, plan: d.plan, current: d.current, limit: d.limit });
+    }
+  }
+
+  const includedRows = rows.filter(
+    (r) => decisions.get(`${r.account_id}::${r.chain_id}`)?.include,
+  );
+  if (includedRows.length === 0) {
+    return {
+      ok: false,
+      status: 200,
+      reason:
+        "all un-anchored chains are at or over their monthly anchor cap",
+      detail: { month, skipped },
+    };
+  }
 
   const prev = await env.DB.prepare(
     "SELECT epoch_id FROM epochs ORDER BY epoch_id DESC LIMIT 1",
@@ -606,12 +710,13 @@ async function anchorPending(env: Env): Promise<AnchorFlowResult> {
     .first();
   const epochId = ((prev?.epoch_id as number | undefined) ?? -1) + 1;
 
-  const leaves = rows.map((r) => r.envelope_hash);
+  const leaves = includedRows.map((r) => r.envelope_hash);
   const { root } = await buildMerkleTree(leaves);
 
   const nowSec = Math.floor(Date.now() / 1000);
-  const firstReceived = rows[0]?.received_at ?? nowSec;
-  const lastReceived = rows[rows.length - 1]?.received_at ?? nowSec;
+  const firstReceived = includedRows[0]?.received_at ?? nowSec;
+  const lastReceived =
+    includedRows[includedRows.length - 1]?.received_at ?? nowSec;
 
   let anchorTxHash: string;
   try {
@@ -627,7 +732,7 @@ async function anchorPending(env: Env): Promise<AnchorFlowResult> {
       ok: false,
       status: 502,
       reason: `anchor tx failed: ${(err as Error).message}`,
-      detail: { epoch_id_attempted: epochId, event_count: rows.length, root },
+      detail: { epoch_id_attempted: epochId, event_count: includedRows.length, root },
     };
   }
 
@@ -639,7 +744,7 @@ async function anchorPending(env: Env): Promise<AnchorFlowResult> {
     .bind(
       epochId,
       root,
-      rows.length,
+      includedRows.length,
       firstReceived,
       lastReceived,
       nowSec,
@@ -648,8 +753,8 @@ async function anchorPending(env: Env): Promise<AnchorFlowResult> {
     )
     .run();
 
-  for (let i = 0; i < rows.length; i++) {
-    const r = rows[i]!;
+  for (let i = 0; i < includedRows.length; i++) {
+    const r = includedRows[i]!;
     await env.DB.prepare(
       "UPDATE events SET epoch_id = ?, epoch_leaf_idx = ? WHERE chain_id = ? AND seq = ?",
     )
@@ -657,12 +762,28 @@ async function anchorPending(env: Env): Promise<AnchorFlowResult> {
       .run();
   }
 
+  // Increment anchor_usage_monthly for each (account, chain) included.
+  const uniqueChains = new Set(
+    includedRows.map((r) => `${r.account_id}::${r.chain_id}`),
+  );
+  for (const key of uniqueChains) {
+    const [account_id, chain_id] = key.split("::");
+    await env.DB.prepare(
+      `INSERT INTO anchor_usage_monthly (account_id, chain_id, month, anchor_count)
+       VALUES (?, ?, ?, 1)
+       ON CONFLICT (account_id, chain_id, month) DO UPDATE SET anchor_count = anchor_count + 1`,
+    )
+      .bind(account_id, chain_id, month)
+      .run();
+  }
+
   return {
     ok: true,
     epoch_id: epochId,
     merkle_root: root,
-    event_count: rows.length,
+    event_count: includedRows.length,
     anchor_tx_hash: anchorTxHash,
+    skipped,
   };
 }
 
@@ -689,6 +810,51 @@ app.post("/admin/anchor", async (c) => {
     event_count: result.event_count,
     anchor_tx_hash: result.anchor_tx_hash,
     base_explorer: `https://basescan.org/tx/${result.anchor_tx_hash}`,
+    skipped: result.skipped,
+  });
+});
+
+// Usage dashboard: callers see their own per-chain anchor counts for the
+// current month. Requires Bearer API key. Returns one row per chain this
+// account owns, plus the plan's anchor limit for context.
+app.get("/usage", async (c) => {
+  if (!c.env.DB) return c.json({ error: "DB binding missing" }, 500);
+  const bearer = parseBearer(c.req.header("Authorization"));
+  if (!bearer) return c.json({ error: "Bearer API key required" }, 401);
+  const account = await lookupAccountByKey(c.env.DB, bearer);
+  if (!account) return c.json({ error: "invalid or revoked API key" }, 401);
+  const month = currentMonth();
+  const limit = anchorLimitForPlan(account.plan);
+  const chainRows = await c.env.DB.prepare(
+    "SELECT chain_id FROM chains WHERE account_id = ?",
+  )
+    .bind(account.account_id)
+    .all();
+  const usageRows = await c.env.DB.prepare(
+    "SELECT chain_id, anchor_count FROM anchor_usage_monthly WHERE account_id = ? AND month = ?",
+  )
+    .bind(account.account_id, month)
+    .all();
+  const usageMap = new Map(
+    (usageRows.results as Array<{ chain_id: string; anchor_count: number }>).map(
+      (r) => [r.chain_id, r.anchor_count],
+    ),
+  );
+  const chains = (chainRows.results as Array<{ chain_id: string }>).map((r) => {
+    const used = usageMap.get(r.chain_id) ?? 0;
+    return {
+      chain_id: r.chain_id,
+      anchors_this_month: used,
+      anchors_remaining: Math.max(0, limit - used),
+      over_quota: used >= limit,
+    };
+  });
+  return c.json({
+    account_id: account.account_id,
+    plan: account.plan,
+    month,
+    anchor_limit_per_chain: limit,
+    chains,
   });
 });
 

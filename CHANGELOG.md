@@ -21,6 +21,16 @@ All notable changes to Sheaf packages and the recorder Worker.
 ### @sheafhq/verify (0.1.1 → 0.1.2)
 - CLI tries `https://api.sheafhq.io` first when resolving the recorder public key, falls back to `sheaf-recorder.goldencalf.workers.dev` on error.
 
+## 2026-11-11 — WP3 anchor metering + limits
+
+### Worker (sheaf-recorder)
+- `anchorPending()` groups unanchored events by (account, chain). Chains over their plan's monthly anchor cap are excluded from the epoch — their events stay un-anchored until month rollover or plan upgrade. Recording still succeeds unconditionally; only anchoring is gated.
+- `anchor_usage_monthly` incremented per (account, chain, month) on each successful anchor tx.
+- Plan caps: free = 30 anchors/chain/month, pro = 720, legacy-public = unlimited (keeps pre-WP2 demo chains anchoring forever).
+- `GET /usage` — new. Bearer-authed. Returns `{account_id, plan, month, anchor_limit_per_chain, chains: [{chain_id, anchors_this_month, anchors_remaining, over_quota}]}`.
+- `POST /events` response sets `x-sheaf-anchor-usage: N/limit` and (at ≥80%) `x-sheaf-anchor-quota: warning`, (at 100%) `x-sheaf-anchor-quota: exceeded`. Recorder client will surface these in WP6.
+- `/admin/anchor` + cron now return `skipped: [{account_id, chain_id, plan, current, limit}]` when some chains were held back.
+
 ## 2026-11-11 — WP5 verification page + badge
 
 ### Worker (sheaf-recorder)
