@@ -21,6 +21,21 @@ All notable changes to Sheaf packages and the recorder Worker.
 ### @sheafhq/verify (0.1.1 → 0.1.2)
 - CLI tries `https://api.sheafhq.io` first when resolving the recorder public key, falls back to `sheaf-recorder.goldencalf.workers.dev` on error.
 
+## 2026-11-11 — WP7a external anchoring adapters
+
+### @sheafhq/anchor-signet (0.1.0, new)
+- CLI `sheaf-anchor-signet`. Reads a Signet `records.jsonl` audit log (default: `~/.signet/records.jsonl`), computes head (record count + last-line hash + whole-file hash), submits one Sheaf event documenting the snapshot. Does not modify Signet state. Positions Sheaf as the neutral anchoring layer above Signet (Apache-2.0 / MIT).
+- Smoke-tested against synthetic log on live recorder.
+
+### @sheafhq/anchor-agent-receipts (0.1.0, new)
+- CLI `sheaf-anchor-agent-receipts`. Reads an Agent Receipts (obsigna) NDJSON export, extracts W3C VC-shaped head metadata (last `credentialSubject.action` + hash), submits one Sheaf event. Works independently of the obsigna daemon.
+- Smoke-tested against synthetic W3C VC log on live recorder.
+
+### Spec check (done before building)
+- Agent Receipts: local SQLite + Ed25519, no on-chain anchoring. License undisclosed on landing page. Repo at agent-receipts/obsigna.
+- Signet: local JSONL + Ed25519 + SHA-256 hash chain, no blockchain. Apache-2.0 + MIT. Repo at prismer-ai/signet.
+- Neither offers third-party public anchoring today. Brief's stop-and-report condition does not apply.
+
 ## 2026-11-11 — WP3 anchor metering + limits
 
 ### Worker (sheaf-recorder)
