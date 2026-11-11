@@ -1,0 +1,15 @@
+{
+  "name": "sheafhq",
+  "description": "Sheaf plugins for Claude Code: on-chain audit layer for AI agent tool calls.",
+  "owner": {
+    "name": "sheafhq",
+    "url": "https://github.com/sheafhq/sheaf"
+  },
+  "plugins": [
+    {
+      "name": "sheafhq",
+      "source": "./packages/claude-plugin",
+      "description": "Install the Sheaf verification tools MCP server in Claude Code."
+    }
+  ]
+}

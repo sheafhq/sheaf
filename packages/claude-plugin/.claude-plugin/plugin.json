@@ -1,0 +1,12 @@
+{
+  "name": "sheafhq",
+  "version": "0.1.0",
+  "description": "Sheaf — on-chain audit layer for AI agent tool calls. Installs the @sheafhq/mcp-tools MCP server (sheaf_chain_head, sheaf_get_proof_for, sheaf_verify_bundle) and provides commands for anchoring Claude Code runs.",
+  "author": {
+    "name": "sheafhq",
+    "url": "https://github.com/sheafhq/sheaf"
+  },
+  "homepage": "https://api.sheafhq.io",
+  "license": "MIT",
+  "keywords": ["audit", "attestation", "evidence", "agent", "mcp", "sheaf"]
+}
