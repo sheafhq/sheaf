@@ -1,0 +1,27 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "sheaf-recorder",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true
+  },
+  "vars": {
+    "ISSUER": "sheaf",
+    "KEY_ID": "sheaf-ed25519-2026-11-09",
+    "ANCHOR_CONTRACT": "",
+    "ANCHOR_NETWORK": "eip155:8453",
+    "ANCHORER_ADDRESS": "0x08A22c6899a8b2eccA4b2B752a89eD498d7b2100"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "arca-events",
+      "database_id": "3d1f9d7e-378e-4fda-ad37-5f989580e8d8"
+    }
+  ]
+  // Secrets added via `wrangler secret put`:
+  //   RECORDER_PRIVATE_KEY — Ed25519 (PKCS8 base64) signing key
+  //   ANCHORER_PRIVATE_KEY — (phase 3) EOA that signs anchor() txs on Base
+}
