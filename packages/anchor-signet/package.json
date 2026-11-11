@@ -1,0 +1,41 @@
+{
+  "name": "@sheafhq/anchor-signet",
+  "version": "0.1.0",
+  "description": "Anchor a Signet audit log head to Sheaf — one command, no changes to your Signet setup. Takes a Signet records.jsonl, computes the current head hash + count, submits as a Sheaf event, prints the verification URL. Pair with cron or systemd for periodic anchoring. Signet (Apache-2.0 / MIT) is a standalone attestation layer by prismer-ai; this adapter is maintained independently and does not modify Signet state.",
+  "type": "module",
+  "main": "./dist/cli.js",
+  "bin": {
+    "sheaf-anchor-signet": "dist/cli.js"
+  },
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "sheaf",
+    "signet",
+    "anchor",
+    "audit",
+    "attestation",
+    "evidence",
+    "agent"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sheafhq/sheaf.git",
+    "directory": "packages/anchor-signet"
+  },
+  "homepage": "https://github.com/sheafhq/sheaf/tree/main/packages/anchor-signet",
+  "bugs": {
+    "url": "https://github.com/sheafhq/sheaf/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "@types/node": "^22.0.0"
+  }
+}

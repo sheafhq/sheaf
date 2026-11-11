@@ -1,0 +1,43 @@
+{
+  "name": "@sheafhq/anchor-agent-receipts",
+  "version": "0.1.0",
+  "description": "Anchor an Agent Receipts (obsigna) audit log head to Sheaf. Reads your Agent Receipts NDJSON export, submits the current head hash + record count to the Sheaf recorder for signing, hash-chaining, and periodic on-chain anchoring on Base mainnet. Maintained independently of Agent Receipts; does not modify its local state.",
+  "type": "module",
+  "main": "./dist/cli.js",
+  "bin": {
+    "sheaf-anchor-agent-receipts": "dist/cli.js"
+  },
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "sheaf",
+    "agent-receipts",
+    "obsigna",
+    "anchor",
+    "audit",
+    "attestation",
+    "evidence",
+    "agent",
+    "w3c-vc"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sheafhq/sheaf.git",
+    "directory": "packages/anchor-agent-receipts"
+  },
+  "homepage": "https://github.com/sheafhq/sheaf/tree/main/packages/anchor-agent-receipts",
+  "bugs": {
+    "url": "https://github.com/sheafhq/sheaf/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "@types/node": "^22.0.0"
+  }
+}
