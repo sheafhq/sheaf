@@ -1,0 +1,48 @@
+{
+  "name": "@sheafhq/mcp-tools",
+  "version": "0.1.0",
+  "description": "MCP server exposing Sheaf read tools (chain_head, get_proof_for, verify_bundle). Lets any MCP-compatible agent query the Sheaf recorder and verify receipts offline. Pairs with @sheafhq/mcp-recorder (transparent event capture) but ships as a separate, opt-in tool surface so the recorder stays purely transparent.",
+  "type": "module",
+  "main": "./dist/cli.js",
+  "bin": {
+    "sheaf-mcp-tools": "dist/cli.js"
+  },
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "sheaf",
+    "mcp",
+    "mcp-server",
+    "audit",
+    "attestation",
+    "agent",
+    "verification",
+    "receipt",
+    "merkle-proof",
+    "evidence"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sheafhq/sheaf.git",
+    "directory": "packages/mcp-tools"
+  },
+  "homepage": "https://github.com/sheafhq/sheaf/tree/main/packages/mcp-tools",
+  "bugs": {
+    "url": "https://github.com/sheafhq/sheaf/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@sheafhq/verify": "^0.1.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "@types/node": "^22.0.0",
+    "@anthropic-ai/sdk": "^0.33.0"
+  }
+}
