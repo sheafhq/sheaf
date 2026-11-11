@@ -11,6 +11,13 @@ import { anchorRoot } from "./anchor.js";
 import { buildBundle, BUNDLE_VERSION } from "./bundle.js";
 import { buildCreateAuthHeaders, extractPayer } from "./x402.js";
 import { VERIFY_HTML } from "./verify-page.js";
+import {
+  createAccount,
+  getChainOwner,
+  LEGACY_ACCOUNT_ID,
+  lookupAccountByKey,
+  parseBearer,
+} from "./accounts.js";
 import type {
   ChainHead,
   Envelope,
@@ -184,6 +191,44 @@ function validateSubmission(x: unknown): string | null {
   return null;
 }
 
+// Account-signup endpoint (WP2). Takes an optional email, returns one-time
+// API key. The plaintext key is NEVER stored or retrievable — only its
+// SHA-256 hash is persisted. Clients that lose the key create a new one
+// and revoke the old one (revocation endpoint added in WP6).
+app.post("/accounts", async (c) => {
+  if (!c.env.DB) return c.json({ error: "DB binding missing" }, 500);
+  let body: { email?: string } = {};
+  try {
+    const raw = await c.req.text();
+    if (raw.trim()) body = JSON.parse(raw) as { email?: string };
+  } catch {
+    return c.json({ error: "invalid JSON body" }, 400);
+  }
+  const email =
+    typeof body.email === "string" && body.email.includes("@")
+      ? body.email.trim()
+      : null;
+  try {
+    const { account, api_key } = await createAccount(c.env.DB, email);
+    return c.json(
+      {
+        ok: true,
+        account_id: account.account_id,
+        api_key,
+        plan: account.plan,
+        created_at: account.created_at,
+        note: "api_key is shown ONCE. Store it now; it cannot be retrieved later. Use in POST /events as `Authorization: Bearer <api_key>`.",
+      },
+      201,
+    );
+  } catch (e) {
+    return c.json(
+      { error: `account creation failed: ${(e as Error).message}` },
+      500,
+    );
+  }
+});
+
 app.post("/events", async (c) => {
   if (!c.env.DB)
     return c.json({ error: "DB binding missing on this Worker" }, 500);
@@ -201,6 +246,47 @@ app.post("/events", async (c) => {
 
   const submission = body as UnsignedSubmission;
   const { chain_id, seq, prev_hash } = submission.chain;
+
+  // --- WP2 chain-ownership check -----------------------------------------
+  // Rules:
+  //   1. If chain exists AND is owned by a real account: Bearer key required
+  //      and must match that account.
+  //   2. If chain exists AND is owned by 'legacy-public': accept without
+  //      auth (grandfather — writes to pre-WP2 chains keep working).
+  //   3. If chain is new: Bearer key required; new chain inherits caller's
+  //      account_id.
+  const bearer = parseBearer(c.req.header("Authorization"));
+  const account = bearer ? await lookupAccountByKey(c.env.DB, bearer) : null;
+  if (bearer && !account) {
+    return c.json({ error: "invalid or revoked API key" }, 401);
+  }
+  const existingOwner = await getChainOwner(c.env.DB, chain_id);
+  let chainAccountId: string;
+  if (existingOwner === null) {
+    // New chain — require auth.
+    if (!account) {
+      return c.json(
+        {
+          error:
+            "new chains require an API key. Create one via POST /accounts, then send Authorization: Bearer <key>.",
+        },
+        401,
+      );
+    }
+    chainAccountId = account.account_id;
+  } else if (existingOwner === LEGACY_ACCOUNT_ID) {
+    // Grandfather: legacy chains accept writes with or without auth.
+    chainAccountId = LEGACY_ACCOUNT_ID;
+  } else {
+    // Real-owner chain — require matching auth.
+    if (!account || account.account_id !== existingOwner) {
+      return c.json(
+        { error: `chain ${chain_id} is owned by a different account` },
+        403,
+      );
+    }
+    chainAccountId = existingOwner;
+  }
 
   // Check chain head. seq must equal head_seq+1 (or be 0 if no head).
   const head = await c.env.DB.prepare(
@@ -290,15 +376,15 @@ app.post("/events", async (c) => {
   }
 
   await c.env.DB.prepare(
-    `INSERT INTO chains (chain_id, head_seq, head_hash, created_at, updated_at, event_count)
-     VALUES (?, ?, ?, ?, ?, 1)
+    `INSERT INTO chains (chain_id, head_seq, head_hash, created_at, updated_at, event_count, account_id)
+     VALUES (?, ?, ?, ?, ?, 1, ?)
      ON CONFLICT(chain_id) DO UPDATE SET
        head_seq = excluded.head_seq,
        head_hash = excluded.head_hash,
        updated_at = excluded.updated_at,
        event_count = chains.event_count + 1`,
   )
-    .bind(chain_id, seq, env_hash, nowSec, nowSec)
+    .bind(chain_id, seq, env_hash, nowSec, nowSec, chainAccountId)
     .run();
 
   const receipt: SubmissionReceipt = {

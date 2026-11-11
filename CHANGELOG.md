@@ -21,6 +21,17 @@ All notable changes to Sheaf packages and the recorder Worker.
 ### @sheafhq/verify (0.1.1 → 0.1.2)
 - CLI tries `https://api.sheafhq.io` first when resolving the recorder public key, falls back to `sheaf-recorder.goldencalf.workers.dev` on error.
 
+## 2026-11-11 — WP2 accounts + chain ownership
+
+### Worker (sheaf-recorder)
+- D1 migration `0003_accounts.sql`: `accounts`, `api_keys` (hashed), `anchor_usage_monthly`, `chains.account_id` with backfill to singleton `legacy-public` account.
+- `POST /accounts` — new. Creates an account + first API key (shown once). Optional email.
+- `POST /events` — chain-ownership check added. New chain requires `Authorization: Bearer <sk_live_...>`. Existing legacy chains (pre-WP2) grandfather unauthenticated writes. Account-mismatch returns 403.
+- Acceptance tested: account creation, auth-required new chain, grandfather legacy chain, invalid-key rejection.
+
+### Test account for this session's smoke
+- `acct_c9b45092ae73950f` — burned test account; its API key is in this transcript. Not sensitive (test data only).
+
 ## 2026-11-11 — self-serve brief rev 2
 
 Pricing axis switched from events/month to anchors per chain per month. See `claude/sheaf-self-serve-brief.md` for the full rev 2 deltas.
