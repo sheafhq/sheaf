@@ -16,6 +16,7 @@ jobs:
     permissions:
       contents: read
     steps:
+      - uses: actions/checkout@v4
       - name: Anchor on Sheaf
         id: anchor
         uses: ./packages/anchor-action
