@@ -21,6 +21,13 @@ All notable changes to Sheaf packages and the recorder Worker.
 ### @sheafhq/verify (0.1.1 → 0.1.2)
 - CLI tries `https://api.sheafhq.io` first when resolving the recorder public key, falls back to `sheaf-recorder.goldencalf.workers.dev` on error.
 
+## 2026-11-11 — WP5 verification page + badge
+
+### Worker (sheaf-recorder)
+- `GET /c/:chain_id` — public verification page. Server-rendered HTML: stats (events / on-chain anchors / account), latest anchor details with basescan link, recent 5 events (seq / tool / result / when / anchor), paste-ready badge markdown, in-browser "verify latest anchored event" button that runs `@sheafhq/verify@0.1.2` via esm.sh against a free Base RPC — zero payment, zero signup.
+- `GET /badge/:chain_id.svg` — shields.io-style SVG. Green when anchored (`sheaf: N anchors`), grey when unused. Content-Type `image/svg+xml`, 60s cache.
+- Both endpoints public and free. No private-chain gating yet (Pro-tier feature, future WP).
+
 ## 2026-11-11 — WP2 accounts + chain ownership
 
 ### Worker (sheaf-recorder)
