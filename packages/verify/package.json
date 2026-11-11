@@ -1,10 +1,13 @@
 {
   "name": "@sheafhq/verify",
-  "version": "0.1.0",
-  "description": "Standalone verifier for Sheaf receipts. Checks hash chain + Merkle inclusion + Ed25519 signature + Base L2 anchor, all offline (only reads the anchor tx from a Base RPC).",
+  "version": "0.1.1",
+  "description": "Standalone verifier for Sheaf receipts. Checks hash chain + Merkle inclusion + Ed25519 signature + Base L2 anchor, all offline (only reads the anchor tx from a Base RPC). Use as a library or run `npx @sheafhq/verify <bundle.sheaf>`.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "sheaf-verify": "dist/cli.js"
+  },
   "exports": {
     ".": {
       "import": "./dist/index.js",
@@ -43,6 +46,7 @@
     "access": "public"
   },
   "devDependencies": {
-    "typescript": "^5.6.0"
+    "typescript": "^5.6.0",
+    "@types/node": "^22.0.0"
   }
 }

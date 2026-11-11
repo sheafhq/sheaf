@@ -1,0 +1,38 @@
+# Example GitHub Action: verify a Sheaf receipt bundle in CI.
+#
+# Drop this file at .github/workflows/verify-sheaf.yml in any repo. It checks
+# that ./bundle.sheaf (produced by an earlier step in your agent pipeline) is
+# cryptographically valid against the Sheaf recorder — signature, Merkle
+# inclusion proof, and on-chain anchor on Base mainnet.
+#
+# Exits non-zero if the bundle fails, blocking merges / failing the workflow.
+
+name: Verify Sheaf receipt
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      bundle_path:
+        description: "Path to the .sheaf bundle inside the checked-out repo"
+        required: false
+        default: "./bundle.sheaf"
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Verify bundle
+        run: |
+          BUNDLE="${{ github.event.inputs.bundle_path || './bundle.sheaf' }}"
+          if [ ! -f "$BUNDLE" ]; then
+            echo "::warning::$BUNDLE not found — no Sheaf receipt to verify."
+            exit 0
+          fi
+          npx -y @sheafhq/verify "$BUNDLE"
