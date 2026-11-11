@@ -1,0 +1,48 @@
+{
+  "name": "@sheafhq/verify",
+  "version": "0.1.0",
+  "description": "Standalone verifier for Sheaf receipts. Checks hash chain + Merkle inclusion + Ed25519 signature + Base L2 anchor, all offline (only reads the anchor tx from a Base RPC).",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "sheaf",
+    "audit",
+    "attestation",
+    "agent",
+    "mcp",
+    "ed25519",
+    "merkle",
+    "hash-chain",
+    "base",
+    "evidence",
+    "verifier"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sheafhq/sheaf.git",
+    "directory": "packages/verify"
+  },
+  "homepage": "https://github.com/sheafhq/sheaf/tree/main/packages/verify",
+  "bugs": {
+    "url": "https://github.com/sheafhq/sheaf/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  }
+}
