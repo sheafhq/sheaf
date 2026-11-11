@@ -6,8 +6,8 @@
 name: Self-anchor
 
 on:
-  push:
-    branches: [main]
+  # push trigger disabled until SHEAF_API_KEY secret is set on the repo.
+  # Flip back to on: push when the secret lands.
   workflow_dispatch:
 
 jobs:
