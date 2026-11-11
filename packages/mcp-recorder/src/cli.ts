@@ -3,7 +3,9 @@
 //   sheaf-mcp-recorder --wrap <command> [args...]
 //
 // Environment variables:
-//   SHEAF_RECORDER_URL   where to POST events (default: production)
+//   SHEAF_RECORDER_URL   where to POST events. If unset: tries api.sheafhq.io,
+//                        falls back to sheaf-recorder.goldencalf.workers.dev
+//                        on network error. If set, no fallback.
 //   SHEAF_CHAIN_ID       required. Stable per-session / per-agent identifier.
 //   SHEAF_ACTOR          default: SHEAF_CHAIN_ID
 //   SHEAF_CAPTURE_METHODS  comma-separated JSON-RPC methods to capture
@@ -34,10 +36,16 @@ const commandArgs = argv.slice(wrapIdx + 2);
 const chainId = process.env.SHEAF_CHAIN_ID;
 if (!chainId) die("SHEAF_CHAIN_ID env var is required");
 
+const DEFAULT_URLS = [
+  "https://api.sheafhq.io",
+  "https://sheaf-recorder.goldencalf.workers.dev",
+];
+const recorderUrls = process.env.SHEAF_RECORDER_URL
+  ? [process.env.SHEAF_RECORDER_URL]
+  : DEFAULT_URLS;
+
 const cfg: RecorderConfig = {
-  recorderUrl:
-    process.env.SHEAF_RECORDER_URL ??
-    "https://sheaf-recorder.goldencalf.workers.dev",
+  recorderUrls,
   chainId,
   actor: process.env.SHEAF_ACTOR ?? chainId,
   captureMethods: new Set(
@@ -53,9 +61,9 @@ const cfg: RecorderConfig = {
 };
 
 if (cfg.logDebug) {
-  console.error(`[arca] wrapping: ${command} ${commandArgs.join(" ")}`);
+  console.error(`[sheaf] wrapping: ${command} ${commandArgs.join(" ")}`);
   console.error(
-    `[arca] recorder=${cfg.recorderUrl} chain=${cfg.chainId} actor=${cfg.actor} capture=[${[...cfg.captureMethods].join(",")}]`,
+    `[sheaf] recorders=[${cfg.recorderUrls.join(",")}] chain=${cfg.chainId} actor=${cfg.actor} capture=[${[...cfg.captureMethods].join(",")}]`,
   );
 }
 

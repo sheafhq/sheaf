@@ -12,7 +12,30 @@
     "KEY_ID": "sheaf-ed25519-2026-11-09",
     "ANCHOR_CONTRACT": "",
     "ANCHOR_NETWORK": "eip155:8453",
-    "ANCHORER_ADDRESS": "0x08A22c6899a8b2eccA4b2B752a89eD498d7b2100"
+    "ANCHORER_ADDRESS": "0x08A22c6899a8b2eccA4b2B752a89eD498d7b2100",
+    // x402 paid-surface vars (bundle download at $0.001). Same payout wallet
+    // as goldencalf; linkable under @gcalf public identity.
+    "PAYOUT_ADDRESS": "0xE5126f9Cf0fab2B709D932b2516Ade946ebD9629",
+    "NETWORK": "eip155:8453",
+    "FACILITATOR_URL": "https://api.cdp.coinbase.com/platform/v2/x402"
+  },
+  // Custom domain (WP1). Cloudflare auto-provisions the DNS record when
+  // this route is deployed, since the zone and Worker share one CF account.
+  // workers_dev: true keeps the legacy sheaf-recorder.goldencalf.workers.dev
+  // URL active — adding `routes` disables it otherwise, which would break
+  // every client still pointed at the old URL.
+  "workers_dev": true,
+  "routes": [
+    { "pattern": "api.sheafhq.io", "custom_domain": true }
+  ],
+  "analytics_engine_datasets": [
+    { "binding": "ANALYTICS", "dataset": "sheaf_recorder" }
+  ],
+  // Cron trigger: every 15 minutes, check for un-anchored events and if any
+  // exist, seal them into a new epoch + submit an anchor tx. If there are no
+  // un-anchored events the handler is a cheap no-op (one D1 SELECT).
+  "triggers": {
+    "crons": ["*/15 * * * *"]
   },
   "d1_databases": [
     {
@@ -23,5 +46,7 @@
   ]
   // Secrets added via `wrangler secret put`:
   //   RECORDER_PRIVATE_KEY — Ed25519 (PKCS8 base64) signing key
-  //   ANCHORER_PRIVATE_KEY — (phase 3) EOA that signs anchor() txs on Base
+  //   ANCHORER_PRIVATE_KEY — EOA that signs anchor() txs on Base
+  //   CDP_API_KEY_NAME     — CDP x402 facilitator key name
+  //   CDP_API_KEY_SECRET   — CDP facilitator Ed25519 key (64 bytes base64)
 }

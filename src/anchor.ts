@@ -11,10 +11,10 @@ import { createWalletClient, createPublicClient, http, fallback, type Hex } from
 import { privateKeyToAccount } from "viem/accounts";
 import { base } from "viem/chains";
 
-// Multiple public RPCs with failover. mainnet.base.org rate-limits Cloudflare
-// Worker egress IPs; llamarpc + publicnode are less aggressive. Order matters:
-// viem tries them in order and falls back on error.
-const BASE_RPCS = [
+// Public RPC fallbacks. mainnet.base.org rate-limits Cloudflare Worker egress
+// IPs; llamarpc + publicnode are less aggressive. Used only when no paid RPC
+// is configured (BASE_RPC_URL secret).
+const PUBLIC_BASE_RPCS = [
   "https://base.llamarpc.com",
   "https://base.publicnode.com",
   "https://base-rpc.publicnode.com",
@@ -53,11 +53,18 @@ export async function anchorRoot(
   privateKeyHex: string,
   epochId: number,
   rootHex: string,
+  authedRpcUrl?: string,
 ): Promise<AnchorResult> {
   const account = privateKeyToAccount(privateKeyHex as Hex);
   const data = encodeCalldata(epochId, rootHex);
 
-  const transport = fallback(BASE_RPCS.map((url) => http(url)));
+  // Prefer the configured authenticated RPC (e.g. Alchemy) when present,
+  // falling back to public endpoints if it errors. Without a configured RPC,
+  // we rely entirely on the public pool (which CF-egress rate-limits bite).
+  const urls = authedRpcUrl
+    ? [authedRpcUrl, ...PUBLIC_BASE_RPCS]
+    : PUBLIC_BASE_RPCS;
+  const transport = fallback(urls.map((url) => http(url)));
   const wallet = createWalletClient({
     account,
     chain: base,

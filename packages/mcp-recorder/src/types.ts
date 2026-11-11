@@ -19,7 +19,11 @@ export type JsonRpcNotification = {
 };
 
 export type RecorderConfig = {
-  recorderUrl: string;       // SHEAF_RECORDER_URL
+  /** Primary + fallback recorder URLs. If SHEAF_RECORDER_URL is set, a single
+   *  URL is used (no fallback — trust the explicit override). Otherwise the
+   *  default is [api.sheafhq.io, workers.dev]: try primary, fall back on
+   *  network error. */
+  recorderUrls: string[];
   chainId: string;           // SHEAF_CHAIN_ID (required)
   actor: string;             // SHEAF_ACTOR (default: chainId)
   captureMethods: Set<string>; // SHEAF_CAPTURE_METHODS

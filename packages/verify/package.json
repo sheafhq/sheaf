@@ -1,6 +1,6 @@
 {
   "name": "@sheafhq/verify",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Standalone verifier for Sheaf receipts. Checks hash chain + Merkle inclusion + Ed25519 signature + Base L2 anchor, all offline (only reads the anchor tx from a Base RPC). Use as a library or run `npx @sheafhq/verify <bundle.sheaf>`.",
   "type": "module",
   "main": "./dist/index.js",

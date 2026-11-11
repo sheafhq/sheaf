@@ -1,9 +1,16 @@
 import { Hono } from "hono";
+import { paymentMiddleware, x402ResourceServer } from "@x402/hono";
+import { HTTPFacilitatorClient } from "@x402/core/server";
+import { ExactEvmScheme } from "@x402/evm/exact/server";
+import { declareDiscoveryExtension } from "@x402/extensions/bazaar";
 import { envelopeHash, signingInput } from "./chain.js";
 import { importRecorderKey, b64encode, signEd25519 } from "./crypto.js";
 import { ACTIVE_KEY_ID, KEY_RING, activeKey } from "./keys.js";
 import { buildMerkleTree, inclusionProof, EMPTY_ROOT } from "./merkle.js";
 import { anchorRoot } from "./anchor.js";
+import { buildBundle, BUNDLE_VERSION } from "./bundle.js";
+import { buildCreateAuthHeaders, extractPayer } from "./x402.js";
+import { VERIFY_HTML } from "./verify-page.js";
 import type {
   ChainHead,
   Envelope,
@@ -20,6 +27,22 @@ type Env = {
   ANCHORER_PRIVATE_KEY?: string;
   ANCHORER_ADDRESS?: string;
   ADMIN_TOKEN?: string;
+  // Authenticated Base RPC (Alchemy / QuickNode / Infura). Preferred over
+  // the public pool because CF-egress IPs get rate-limited by mainnet.base.org.
+  BASE_RPC_URL?: string;
+  // x402 paid-surface config
+  PAYOUT_ADDRESS: string;
+  NETWORK: string;
+  FACILITATOR_URL: string;
+  CDP_API_KEY_NAME?: string;
+  CDP_API_KEY_SECRET?: string;
+  ANALYTICS?: {
+    writeDataPoint(event: {
+      blobs?: string[];
+      doubles?: number[];
+      indexes?: string[];
+    }): void;
+  };
   DB?: {
     prepare(query: string): {
       bind(
@@ -37,25 +60,79 @@ const app = new Hono<{ Bindings: Env }>();
 
 const ONE_DAY_CACHE = "public, max-age=86400, s-maxage=86400";
 
+// Lightweight request logger: Analytics Engine only (D1 writes stay on the
+// envelope hot path). Captures paid vs unpaid, payer wallet, latency, status.
+app.use(async (c, next) => {
+  const t0 = Date.now();
+  await next();
+  const latency = Date.now() - t0;
+  const paymentHeader =
+    c.req.header("PAYMENT-SIGNATURE") ??
+    c.req.header("payment-signature") ??
+    c.req.header("X-PAYMENT") ??
+    c.req.header("x-payment");
+  const paid = Boolean(paymentHeader);
+  const payer = extractPayer(paymentHeader);
+  try {
+    c.env.ANALYTICS?.writeDataPoint({
+      blobs: [
+        c.req.path,
+        paid ? "paid" : "unpaid",
+        String(c.res.status),
+        payer ?? "",
+      ],
+      doubles: [latency],
+      indexes: [c.req.path.split("/")[1] ?? "other"],
+    });
+  } catch {}
+});
+
 app.get("/", (c) =>
   c.json({
     service: "sheaf",
     description:
-      "Third-party execution recorder for AI agents. Hash-chained, Merkle-anchored (phase 3), independently verifiable receipts.",
-    status: "phase 2 — recorder core live, Merkle anchoring in phase 3",
+      "Third-party execution recorder for AI agents. Hash-chained, Merkle-anchored, independently verifiable receipts.",
+    status: "live — recorder, anchor, bundle",
     repo: "https://github.com/sheafhq/sheaf",
     architecture_doc: "https://github.com/sheafhq/sheaf/blob/main/ARCHITECTURE.md",
-    endpoints: [
-      "POST /events — submit a signed envelope; recorder co-signs and chains it",
-      "GET /events/:chain_id/:seq — fetch stored envelope",
-      "GET /chains/:chain_id/head — current head of a chain",
-      "GET /.well-known/sheaf-public-key — issuer public keys for verification",
-    ],
+    canonical_base_url: "https://api.sheafhq.io",
+    legacy_base_url: "https://sheaf-recorder.goldencalf.workers.dev",
+    endpoints: {
+      free: [
+        "POST /events — submit a signed envelope; recorder co-signs and chains it",
+        "GET /events/:chain_id/:seq — fetch stored envelope",
+        "GET /chains/:chain_id/head — current head of a chain",
+        "GET /epoch/:epoch_id/proof/:chain_id/:seq — Merkle inclusion proof",
+        "GET /.well-known/sheaf-public-key — issuer public keys",
+        "GET /verify — browser drag-drop verifier (HTML page)",
+      ],
+      paid: [
+        "GET /bundle/:chain_id/:seq — self-contained verifiable .sheaf bundle ($0.001)",
+      ],
+    },
     issuer: c.env.ISSUER,
     key_id: c.env.KEY_ID,
     anchor_network: c.env.ANCHOR_NETWORK,
+    payment: {
+      protocol: "x402",
+      protocol_version: 2,
+      network: c.env.NETWORK,
+      asset: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      asset_symbol: "USDC",
+      pay_to: c.env.PAYOUT_ADDRESS,
+      facilitator: c.env.FACILITATOR_URL,
+    },
   }),
 );
+
+// Browser-based drag-drop verifier. Pure static HTML; verification runs
+// client-side against a public Base RPC + the recorder public key embedded
+// in the bundle. One shareable URL for the "try verifying my receipt" moment.
+app.get("/verify", (c) => {
+  c.header("Content-Type", "text/html; charset=utf-8");
+  c.header("Cache-Control", "public, max-age=3600, s-maxage=3600");
+  return c.body(VERIFY_HTML);
+});
 
 app.get("/.well-known/sheaf-public-key", (c) => {
   c.header("Cache-Control", ONE_DAY_CACHE);
@@ -277,20 +354,22 @@ app.get("/events/:chain_id/:seq", async (c) => {
   });
 });
 
-// Admin: seal all un-anchored events into a new epoch, build Merkle tree,
-// submit anchor tx to Base. Returns the epoch id + tx hash.
-app.post("/admin/anchor", async (c) => {
-  if (!c.env.DB) return c.json({ error: "DB binding missing" }, 500);
-  if (!c.env.ANCHORER_PRIVATE_KEY)
-    return c.json({ error: "ANCHORER_PRIVATE_KEY secret missing" }, 500);
-  if (!c.env.ADMIN_TOKEN)
-    return c.json({ error: "ADMIN_TOKEN secret missing" }, 500);
-  const auth = c.req.header("Authorization");
-  if (auth !== `Bearer ${c.env.ADMIN_TOKEN}`)
-    return c.json({ error: "unauthorized" }, 401);
+// Core anchor flow — shared by the HTTP admin endpoint and the cron
+// scheduled handler. Seals all un-anchored events into a new epoch, builds
+// the Merkle tree, submits the anchor tx on Base, persists the epoch row,
+// and stamps each event with (epoch_id, leaf_idx). Idempotent only in the
+// sense that if there are no un-anchored events it is a no-op; otherwise
+// each call creates exactly one new epoch.
+type AnchorFlowResult =
+  | { ok: true; epoch_id: number; merkle_root: string; event_count: number; anchor_tx_hash: string }
+  | { ok: false; status: number; reason: string; detail?: unknown };
 
-  // Fetch un-anchored events, ordered by received_at for deterministic leaf order
-  const unanchored = await c.env.DB.prepare(
+async function anchorPending(env: Env): Promise<AnchorFlowResult> {
+  if (!env.DB) return { ok: false, status: 500, reason: "DB binding missing" };
+  if (!env.ANCHORER_PRIVATE_KEY)
+    return { ok: false, status: 500, reason: "ANCHORER_PRIVATE_KEY secret missing" };
+
+  const unanchored = await env.DB.prepare(
     `SELECT rowid AS rowid, chain_id, seq, envelope_hash, received_at
      FROM events WHERE epoch_id IS NULL ORDER BY received_at, chain_id, seq`,
   )
@@ -305,43 +384,41 @@ app.post("/admin/anchor", async (c) => {
     received_at: number;
   }>;
   if (rows.length === 0)
-    return c.json({ ok: false, reason: "no un-anchored events" }, 200);
+    return { ok: false, status: 200, reason: "no un-anchored events" };
 
-  // Determine next epoch_id
-  const prev = await c.env.DB.prepare(
+  const prev = await env.DB.prepare(
     "SELECT epoch_id FROM epochs ORDER BY epoch_id DESC LIMIT 1",
   )
     .bind()
     .first();
   const epochId = ((prev?.epoch_id as number | undefined) ?? -1) + 1;
 
-  // Build Merkle tree over envelope hashes in deterministic order
   const leaves = rows.map((r) => r.envelope_hash);
-  const { root, levels } = await buildMerkleTree(leaves);
+  const { root } = await buildMerkleTree(leaves);
 
   const nowSec = Math.floor(Date.now() / 1000);
   const firstReceived = rows[0]?.received_at ?? nowSec;
   const lastReceived = rows[rows.length - 1]?.received_at ?? nowSec;
 
-  // Submit the on-chain anchor tx (self-send with ARCA calldata)
   let anchorTxHash: string;
   try {
-    const result = await anchorRoot(c.env.ANCHORER_PRIVATE_KEY, epochId, root);
+    const result = await anchorRoot(
+      env.ANCHORER_PRIVATE_KEY,
+      epochId,
+      root,
+      env.BASE_RPC_URL,
+    );
     anchorTxHash = result.tx_hash;
   } catch (err) {
-    return c.json(
-      {
-        error: `anchor tx failed: ${(err as Error).message}`,
-        epoch_id_attempted: epochId,
-        event_count: rows.length,
-        root,
-      },
-      502,
-    );
+    return {
+      ok: false,
+      status: 502,
+      reason: `anchor tx failed: ${(err as Error).message}`,
+      detail: { epoch_id_attempted: epochId, event_count: rows.length, root },
+    };
   }
 
-  // Persist epoch record
-  await c.env.DB.prepare(
+  await env.DB.prepare(
     `INSERT INTO epochs (epoch_id, merkle_root, event_count, first_received_at,
      last_received_at, sealed_at, anchor_tx_hash, anchor_submitted_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -358,24 +435,47 @@ app.post("/admin/anchor", async (c) => {
     )
     .run();
 
-  // Stamp each event with (epoch_id, leaf_idx). Doing this one row at a time
-  // in D1; fine for MVP, batch later if needed.
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i]!;
-    await c.env.DB.prepare(
+    await env.DB.prepare(
       "UPDATE events SET epoch_id = ?, epoch_leaf_idx = ? WHERE chain_id = ? AND seq = ?",
     )
       .bind(epochId, i, r.chain_id, r.seq)
       .run();
   }
 
-  return c.json({
+  return {
     ok: true,
     epoch_id: epochId,
     merkle_root: root,
     event_count: rows.length,
     anchor_tx_hash: anchorTxHash,
-    base_explorer: `https://basescan.org/tx/${anchorTxHash}`,
+  };
+}
+
+// Admin: trigger the anchor flow manually. Cron handler below calls the
+// same `anchorPending` without auth.
+app.post("/admin/anchor", async (c) => {
+  if (!c.env.ADMIN_TOKEN)
+    return c.json({ error: "ADMIN_TOKEN secret missing" }, 500);
+  const auth = c.req.header("Authorization");
+  if (auth !== `Bearer ${c.env.ADMIN_TOKEN}`)
+    return c.json({ error: "unauthorized" }, 401);
+
+  const result = await anchorPending(c.env);
+  if (!result.ok) {
+    return c.json(
+      { ok: false, reason: result.reason, detail: result.detail },
+      result.status as 200 | 500 | 502,
+    );
+  }
+  return c.json({
+    ok: true,
+    epoch_id: result.epoch_id,
+    merkle_root: result.merkle_root,
+    event_count: result.event_count,
+    anchor_tx_hash: result.anchor_tx_hash,
+    base_explorer: `https://basescan.org/tx/${result.anchor_tx_hash}`,
   });
 });
 
@@ -450,6 +550,235 @@ app.get("/epoch/:epoch_id/proof/:chain_id/:seq", async (c) => {
   });
 });
 
+// --- Paid bundle surface ---------------------------------------------------
+// Self-contained verifiable artifact for one specific event. Priced at
+// $0.001 via x402. Only served after the event has been anchored (epoch_id
+// non-null and the Merkle root is on Base).
+
+const bundleDiscovery = declareDiscoveryExtension({
+  pathParamsSchema: {
+    type: "object",
+    properties: {
+      chain_id: {
+        type: "string",
+        description:
+          "Chain identifier the event lives in (same chain_id the recorder was writing to).",
+      },
+      seq: {
+        type: "string",
+        description:
+          "Sequence number of the event within its chain (non-negative integer, as a string in the URL).",
+      },
+    },
+    required: ["chain_id", "seq"],
+  },
+  output: {
+    example: {
+      version: BUNDLE_VERSION,
+      envelope: {
+        v: "arca/1",
+        event: {
+          intent: "invoke tool write_file",
+          actor: "agent-123",
+          authority: null,
+          tool: "mcp://tool/write_file",
+          inputs_hash: "sha256:...",
+          outputs_hash: "sha256:...",
+          result: "ok",
+          ts: "2026-11-11T00:00:00Z",
+        },
+        chain: { chain_id: "demo", seq: 0, prev_hash: null },
+        signatures: { actor: null, recorder: "base64-ed25519-signature" },
+      },
+      envelope_hash:
+        "sha256:a1b2c3...",
+      chain: { chain_id: "demo", seq: 0 },
+      anchor: {
+        epoch_id: 0,
+        leaf_index: 0,
+        merkle_root: "sha256:...",
+        siblings: [],
+        tx_hash: "0x...",
+        block: 55369354,
+        network: "eip155:8453",
+        explorer: "https://basescan.org/tx/0x...",
+      },
+      issuer: {
+        name: "sheaf",
+        key_id: "sheaf-ed25519-2026-11-09",
+        public_key_base64: "3HAltFwtHSZp83CLKYF/KKG2Ac4Se/YiD+AkfqCb+e8=",
+        public_key_url:
+          "https://sheaf-recorder.goldencalf.workers.dev/.well-known/sheaf-public-key",
+      },
+      verification: {
+        lib: "@sheafhq/verify",
+        cmd: "npx -y @sheafhq/verify <save-this-bundle.json>",
+      },
+    },
+    schema: {
+      $schema: "https://json-schema.org/draft/2020-12/schema",
+      type: "object",
+      required: [
+        "version",
+        "envelope",
+        "envelope_hash",
+        "chain",
+        "anchor",
+        "issuer",
+        "verification",
+      ],
+      properties: {
+        version: { type: "string", const: BUNDLE_VERSION },
+        envelope: { type: "object" },
+        envelope_hash: { type: "string" },
+        chain: {
+          type: "object",
+          required: ["chain_id", "seq"],
+          properties: {
+            chain_id: { type: "string" },
+            seq: { type: "integer", minimum: 0 },
+          },
+        },
+        anchor: {
+          type: "object",
+          required: [
+            "epoch_id",
+            "leaf_index",
+            "merkle_root",
+            "siblings",
+            "tx_hash",
+            "network",
+          ],
+          properties: {
+            epoch_id: { type: "integer", minimum: 0 },
+            leaf_index: { type: "integer", minimum: 0 },
+            merkle_root: { type: "string" },
+            siblings: {
+              type: "array",
+              items: {
+                type: "object",
+                required: ["hash", "side"],
+                properties: {
+                  hash: { type: "string" },
+                  side: { type: "string", enum: ["left", "right"] },
+                },
+              },
+            },
+            tx_hash: { type: ["string", "null"] },
+            block: { type: ["integer", "null"] },
+            network: { type: "string" },
+            explorer: { type: ["string", "null"] },
+          },
+        },
+        issuer: {
+          type: "object",
+          required: ["name", "key_id", "public_key_base64", "public_key_url"],
+          properties: {
+            name: { type: "string" },
+            key_id: { type: "string" },
+            public_key_base64: { type: "string" },
+            public_key_url: { type: "string" },
+          },
+        },
+        verification: { type: "object" },
+      },
+    },
+  },
+});
+
+// Pre-paywall validator: if the event doesn't exist or isn't anchored yet,
+// return the error without charging. If it's ready, build the bundle and
+// stash it in context for the handler to return.
+app.use("/bundle/:chain_id/:seq", async (c, next) => {
+  if (!c.env.DB) return c.json({ error: "DB binding missing" }, 500);
+  const chainId = c.req.param("chain_id");
+  const seqStr = c.req.param("seq");
+  const seq = Number.parseInt(seqStr, 10);
+  if (!Number.isInteger(seq) || seq < 0) {
+    return c.json({ error: "seq must be a non-negative integer" }, 400);
+  }
+  const publicKeyUrl =
+    new URL(c.req.url).origin + "/.well-known/sheaf-public-key";
+  const result = await buildBundle(
+    c.env.DB,
+    c.env.ISSUER,
+    publicKeyUrl,
+    chainId,
+    seq,
+  );
+  if (!result.ok) {
+    return c.json(
+      { error: result.error, detail: result.detail },
+      result.status,
+    );
+  }
+  (c as unknown as { set(k: string, v: unknown): void }).set(
+    "bundle",
+    result.bundle,
+  );
+  await next();
+});
+
+// x402 wiring. paymentMiddleware is cached at module scope keyed by the
+// first env it sees (env is stable across requests on the same Worker).
+let cachedPaymentMw:
+  | ReturnType<typeof paymentMiddleware>
+  | null = null;
+function getPaymentMiddleware(env: Env) {
+  if (cachedPaymentMw) return cachedPaymentMw;
+  const network = env.NETWORK as `${string}:${string}`;
+  const facilitator = new HTTPFacilitatorClient({
+    url: env.FACILITATOR_URL,
+    createAuthHeaders: buildCreateAuthHeaders(env),
+  });
+  const resourceServer = new x402ResourceServer(facilitator).register(
+    network,
+    new ExactEvmScheme(),
+  );
+  cachedPaymentMw = paymentMiddleware(
+    {
+      "GET /bundle/:chain_id/:seq": {
+        accepts: [
+          {
+            scheme: "exact",
+            price: "$0.001",
+            network,
+            payTo: env.PAYOUT_ADDRESS,
+          },
+        ],
+        description:
+          "Self-contained verifiable Sheaf bundle for one event: full signed envelope + Merkle inclusion proof + on-chain anchor reference + issuer public key. Verify offline with `npx @sheafhq/verify` + any Base RPC. Only returned after the event's epoch is anchored; otherwise 409 'not yet anchored' with no payment taken.",
+        mimeType: "application/json",
+        serviceName: "sheaf",
+        tags: [
+          "audit",
+          "attestation",
+          "evidence",
+          "agent-receipts",
+          "mcp",
+          "merkle-proof",
+          "compliance",
+        ],
+        extensions: { ...bundleDiscovery },
+      },
+    },
+    resourceServer,
+  );
+  return cachedPaymentMw;
+}
+
+// Route-scoped: only the bundle path goes through the paywall.
+app.use(async (c, next) => {
+  if (!c.req.path.startsWith("/bundle/")) return next();
+  return getPaymentMiddleware(c.env)(c, next);
+});
+
+app.get("/bundle/:chain_id/:seq", (c) =>
+  c.json(
+    (c as unknown as { get(k: string): unknown }).get("bundle"),
+  ),
+);
+
 app.get("/epoch/:epoch_id", async (c) => {
   if (!c.env.DB) return c.json({ error: "DB binding missing" }, 500);
   const epochId = Number.parseInt(c.req.param("epoch_id"), 10);
@@ -464,4 +793,40 @@ app.get("/epoch/:epoch_id", async (c) => {
   return c.json(row);
 });
 
-export default app;
+// CF Workers entry. Dispatches HTTP to Hono, cron to the anchor flow.
+export default {
+  fetch(
+    request: Request,
+    env: Env,
+    ctx: ExecutionContext,
+  ): Response | Promise<Response> {
+    return app.fetch(request, env, ctx);
+  },
+  async scheduled(
+    event: ScheduledEvent,
+    env: Env,
+    ctx: ExecutionContext,
+  ): Promise<void> {
+    ctx.waitUntil(
+      (async () => {
+        try {
+          const result = await anchorPending(env);
+          if (result.ok) {
+            console.log(
+              `scheduled anchor: epoch=${result.epoch_id} events=${result.event_count} tx=${result.anchor_tx_hash}`,
+            );
+          } else if (result.reason === "no un-anchored events") {
+            // No-op path; keep logs quiet.
+          } else {
+            console.error(
+              `scheduled anchor failed: ${result.reason}`,
+              result.detail,
+            );
+          }
+        } catch (err) {
+          console.error("scheduled anchor threw:", (err as Error).message);
+        }
+      })(),
+    );
+  },
+};
