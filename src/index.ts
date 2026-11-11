@@ -18,6 +18,8 @@ import {
   lookupAccountByKey,
   parseBearer,
 } from "./accounts.js";
+import { renderChainPage, type ChainSummary } from "./chain-page.js";
+import { renderBadge } from "./badge.js";
 import type {
   ChainHead,
   Envelope,
@@ -139,6 +141,131 @@ app.get("/verify", (c) => {
   c.header("Content-Type", "text/html; charset=utf-8");
   c.header("Cache-Control", "public, max-age=3600, s-maxage=3600");
   return c.body(VERIFY_HTML);
+});
+
+// Public verification page for a specific chain. Server-renders chain state
+// and seeds a browser-side verifier so any reader can prove the latest
+// anchored event without paying or signing up. See chain-page.ts.
+async function loadChainSummary(
+  db: Env["DB"],
+  chainId: string,
+): Promise<ChainSummary> {
+  if (!db) throw new Error("DB binding missing");
+  const chainRow = (await db
+    .prepare(
+      "SELECT chain_id, head_seq, head_hash, event_count, created_at, updated_at, account_id FROM chains WHERE chain_id = ?",
+    )
+    .bind(chainId)
+    .first()) as
+    | {
+        chain_id: string;
+        head_seq: number;
+        head_hash: string;
+        event_count: number;
+        created_at: number;
+        updated_at: number;
+        account_id: string | null;
+      }
+    | null;
+  if (!chainRow) {
+    return {
+      chain_id: chainId,
+      head_seq: null,
+      head_hash: null,
+      event_count: 0,
+      created_at: null,
+      updated_at: null,
+      account_id: LEGACY_ACCOUNT_ID,
+      anchor_count: 0,
+      latest_anchor: null,
+      recent_events: [],
+    };
+  }
+  const anchorCountRow = (await db
+    .prepare(
+      "SELECT COUNT(DISTINCT epoch_id) AS n FROM events WHERE chain_id = ? AND epoch_id IS NOT NULL",
+    )
+    .bind(chainId)
+    .first()) as { n: number } | null;
+  const latestAnchor = (await db
+    .prepare(
+      `SELECT ep.epoch_id, ep.merkle_root, ep.anchor_tx_hash, ep.anchor_block, ep.sealed_at
+       FROM events e JOIN epochs ep ON ep.epoch_id = e.epoch_id
+       WHERE e.chain_id = ? AND e.epoch_id IS NOT NULL
+       ORDER BY e.epoch_id DESC LIMIT 1`,
+    )
+    .bind(chainId)
+    .first()) as
+    | {
+        epoch_id: number;
+        merkle_root: string;
+        anchor_tx_hash: string | null;
+        anchor_block: number | null;
+        sealed_at: number;
+      }
+    | null;
+  const recent = await db
+    .prepare(
+      "SELECT seq, tool, result, ts, epoch_id FROM events WHERE chain_id = ? ORDER BY seq DESC LIMIT 5",
+    )
+    .bind(chainId)
+    .all();
+  return {
+    chain_id: chainRow.chain_id,
+    head_seq: chainRow.head_seq,
+    head_hash: chainRow.head_hash,
+    event_count: chainRow.event_count,
+    created_at: chainRow.created_at,
+    updated_at: chainRow.updated_at,
+    account_id: chainRow.account_id ?? LEGACY_ACCOUNT_ID,
+    anchor_count: anchorCountRow?.n ?? 0,
+    latest_anchor: latestAnchor,
+    recent_events: (recent.results as Array<{
+      seq: number;
+      tool: string;
+      result: string;
+      ts: number;
+      epoch_id: number | null;
+    }>).map((e) => ({
+      seq: e.seq,
+      tool: e.tool,
+      result: e.result,
+      ts: e.ts,
+      epoch_id: e.epoch_id,
+    })),
+  };
+}
+
+app.get("/c/:chain_id", async (c) => {
+  if (!c.env.DB) return c.json({ error: "DB binding missing" }, 500);
+  const chainId = c.req.param("chain_id");
+  if (!chainId) return c.json({ error: "chain_id required" }, 400);
+  const base = new URL(c.req.url).origin;
+  const summary = await loadChainSummary(c.env.DB, chainId);
+  c.header("Content-Type", "text/html; charset=utf-8");
+  c.header("Cache-Control", "public, max-age=30, s-maxage=30");
+  return c.body(renderChainPage(summary, base));
+});
+
+app.get("/badge/:slug", async (c) => {
+  if (!c.env.DB) return c.body("", 500);
+  const slug = c.req.param("slug");
+  if (!slug || !slug.endsWith(".svg")) return c.body("", 400);
+  const chainId = decodeURIComponent(slug.slice(0, -4));
+  if (!chainId) return c.body("", 400);
+  const summary = await loadChainSummary(c.env.DB, chainId);
+  const value =
+    summary.head_seq === null
+      ? "unused"
+      : `${summary.anchor_count} anchor${summary.anchor_count === 1 ? "" : "s"}`;
+  const svg = renderBadge({
+    label: "sheaf",
+    value,
+    anchored: summary.anchor_count > 0,
+  });
+  c.header("Content-Type", "image/svg+xml; charset=utf-8");
+  c.header("Cache-Control", "public, max-age=60, s-maxage=60");
+  return c.body(svg);
 });
 
 app.get("/.well-known/sheaf-public-key", (c) => {
