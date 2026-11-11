@@ -21,6 +21,21 @@ All notable changes to Sheaf packages and the recorder Worker.
 ### @sheafhq/verify (0.1.1 → 0.1.2)
 - CLI tries `https://api.sheafhq.io` first when resolving the recorder public key, falls back to `sheaf-recorder.goldencalf.workers.dev` on error.
 
+## 2026-11-11 — WP7b distribution surface
+
+### packages/anchor-action (GitHub Action, new)
+- Composite action `sheafhq/sheaf/packages/anchor-action@main`. Inputs: `api-key` (required), `chain-id`, `recorder-url`, `intent`, `write-summary`. Outputs: `verify-url`, `badge-url`, `sheaf-seq`, `envelope-hash`.
+- On each workflow run: hashes a canonical JSON of `{repo, run_id, run_number, sha, ref, actor, event_name, workflow, job, started_at}`, submits as a Sheaf event (one event = one run), writes job summary with badge + verify link.
+- Default chain: `gh-{owner}-{repo}` (per-repo). Override for shared / cross-repo anchoring.
+- Zero runtime deps beyond curl + jq (standard on ubuntu-latest).
+- Planned: split to `sheafhq/anchor-action` for GitHub Actions Marketplace listing once API stabilizes.
+
+### packages/claude-plugin (Claude Code plugin, new)
+- Installs `@sheafhq/mcp-tools` MCP server (three Sheaf read tools) in Claude Code.
+- `.claude-plugin/plugin.json` manifest + `.mcp.json` server config.
+- Repo-level `.claude-plugin/marketplace.json` makes the repo discoverable via `/plugin marketplace add sheafhq/sheaf`.
+- README documents the pattern for wrapping other MCP servers with `@sheafhq/mcp-recorder` for transparent capture.
+
 ## 2026-11-11 — WP7a external anchoring adapters
 
 ### @sheafhq/anchor-signet (0.1.0, new)

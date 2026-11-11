@@ -1,0 +1,185 @@
+name: 'Sheaf Anchor'
+description: 'Anchor a GitHub Actions workflow run on-chain via Sheaf. Produces a verifiable receipt + verification URL + badge for your README.'
+author: 'sheafhq'
+branding:
+  icon: 'check-circle'
+  color: 'blue'
+
+inputs:
+  api-key:
+    description: 'Sheaf API key (sk_live_...). Required. Prefer `secrets.SHEAF_API_KEY`.'
+    required: true
+  chain-id:
+    description: >
+      Sheaf chain to append to. If this chain doesn''t exist yet, it''s
+      created and owned by the account behind `api-key`. Default is
+      `gh-{owner}-{repo}` (per-repo chain).
+    required: false
+    default: ''
+  recorder-url:
+    description: 'Sheaf recorder base URL (default: https://api.sheafhq.io).'
+    required: false
+    default: 'https://api.sheafhq.io'
+  intent:
+    description: 'Human-readable intent string stored in the event envelope.'
+    required: false
+    default: 'github actions workflow run'
+  write-summary:
+    description: 'Write the verification URL + badge to the GitHub job summary.'
+    required: false
+    default: 'true'
+
+outputs:
+  verify-url:
+    description: 'Public verification page URL for this chain.'
+    value: ${{ steps.anchor.outputs.verify_url }}
+  badge-url:
+    description: 'Badge SVG URL for README embed.'
+    value: ${{ steps.anchor.outputs.badge_url }}
+  sheaf-seq:
+    description: 'Sequence number assigned to this anchor on the chain.'
+    value: ${{ steps.anchor.outputs.sheaf_seq }}
+  envelope-hash:
+    description: 'Hash of the signed envelope.'
+    value: ${{ steps.anchor.outputs.envelope_hash }}
+
+runs:
+  using: composite
+  steps:
+    - name: Anchor workflow run
+      id: anchor
+      shell: bash
+      env:
+        SHEAF_API_KEY: ${{ inputs.api-key }}
+        SHEAF_RECORDER_URL: ${{ inputs.recorder-url }}
+        SHEAF_CHAIN_OVERRIDE: ${{ inputs.chain-id }}
+        SHEAF_INTENT: ${{ inputs.intent }}
+      run: |
+        set -euo pipefail
+
+        if [ -z "${SHEAF_API_KEY}" ]; then
+          echo "::error::sheafhq/anchor-action: api-key input is required (set secrets.SHEAF_API_KEY)."
+          exit 1
+        fi
+
+        # Default chain ID: gh-<owner>-<repo>. Replace / with - so chain IDs
+        # don't contain path separators. Users can override via chain-id input.
+        if [ -n "${SHEAF_CHAIN_OVERRIDE}" ]; then
+          CHAIN_ID="${SHEAF_CHAIN_OVERRIDE}"
+        else
+          CHAIN_ID="gh-$(echo "${GITHUB_REPOSITORY}" | tr '/' '-')"
+        fi
+
+        # Metadata we anchor. All public, all already visible on github.com,
+        # but the anchor proves the run happened at this point in time with
+        # these exact inputs — useful for audit trails that reference CI.
+        NOW_ISO="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        META_JSON=$(cat <<EOF
+        {
+          "repo": "${GITHUB_REPOSITORY}",
+          "run_id": "${GITHUB_RUN_ID}",
+          "run_number": "${GITHUB_RUN_NUMBER}",
+          "sha": "${GITHUB_SHA}",
+          "ref": "${GITHUB_REF}",
+          "actor": "${GITHUB_ACTOR}",
+          "event_name": "${GITHUB_EVENT_NAME}",
+          "workflow": "${GITHUB_WORKFLOW}",
+          "job": "${GITHUB_JOB}",
+          "started_at": "${NOW_ISO}"
+        }
+        EOF
+        )
+        # Canonical JSON (sort keys, no whitespace) then sha256.
+        INPUTS_HASH="sha256:$(echo -n "${META_JSON}" | jq -S -c . | sha256sum | awk '{print $1}')"
+
+        # Get current chain head (seq + prev_hash) with API key.
+        HEAD_URL="${SHEAF_RECORDER_URL}/chains/$(echo -n "${CHAIN_ID}" | jq -sRr @uri)/head"
+        HEAD_BODY=$(curl -fsS -o /tmp/head.json -w "%{http_code}" -H "Authorization: Bearer ${SHEAF_API_KEY}" "${HEAD_URL}" || echo "000")
+        if [ "${HEAD_BODY}" = "404" ] || [ "${HEAD_BODY}" = "000" ]; then
+          SEQ=0
+          PREV_HASH='null'
+        else
+          SEQ=$(jq '.head_seq + 1' /tmp/head.json)
+          PREV_HASH=$(jq -c '.head_hash' /tmp/head.json)
+        fi
+
+        # Compose envelope. tool URL includes a few readable params; the
+        # canonical inputs_hash covers the full metadata.
+        TOOL_URL="sheaf://external-anchor/github-actions?repo=${GITHUB_REPOSITORY}&run_id=${GITHUB_RUN_ID}&sha=${GITHUB_SHA:0:12}"
+        ENVELOPE_JSON=$(cat <<EOF
+        {
+          "v": "arca/1",
+          "event": {
+            "intent": "${SHEAF_INTENT}",
+            "actor": "github-actions@${GITHUB_REPOSITORY}",
+            "authority": "github.com/${GITHUB_ACTOR}",
+            "tool": "${TOOL_URL}",
+            "inputs_hash": "${INPUTS_HASH}",
+            "outputs_hash": null,
+            "result": "ok",
+            "ts": "${NOW_ISO}"
+          },
+          "chain": {
+            "chain_id": "${CHAIN_ID}",
+            "seq": ${SEQ},
+            "prev_hash": ${PREV_HASH}
+          },
+          "signatures": { "actor": null }
+        }
+        EOF
+        )
+
+        # Submit.
+        EVENTS_URL="${SHEAF_RECORDER_URL}/events"
+        RESP=$(curl -fsS -o /tmp/resp.json -w "%{http_code}" \
+          -H "content-type: application/json" \
+          -H "Authorization: Bearer ${SHEAF_API_KEY}" \
+          -X POST "${EVENTS_URL}" \
+          -d "${ENVELOPE_JSON}") || true
+        STATUS="${RESP:-$?}"
+
+        if [ "${STATUS}" != "201" ]; then
+          echo "::error::Sheaf rejected the anchor (HTTP ${STATUS})"
+          cat /tmp/resp.json || true
+          exit 1
+        fi
+
+        SHEAF_SEQ=$(jq -r '.seq' /tmp/resp.json)
+        ENVELOPE_HASH=$(jq -r '.envelope_hash' /tmp/resp.json)
+        CHAIN_ENC=$(echo -n "${CHAIN_ID}" | jq -sRr @uri)
+        VERIFY_URL="${SHEAF_RECORDER_URL}/c/${CHAIN_ENC}"
+        BADGE_URL="${SHEAF_RECORDER_URL}/badge/${CHAIN_ENC}.svg"
+
+        echo "verify_url=${VERIFY_URL}" >> "${GITHUB_OUTPUT}"
+        echo "badge_url=${BADGE_URL}" >> "${GITHUB_OUTPUT}"
+        echo "sheaf_seq=${SHEAF_SEQ}" >> "${GITHUB_OUTPUT}"
+        echo "envelope_hash=${ENVELOPE_HASH}" >> "${GITHUB_OUTPUT}"
+
+        echo "chain:         ${CHAIN_ID}"
+        echo "sheaf seq:     ${SHEAF_SEQ}"
+        echo "envelope hash: ${ENVELOPE_HASH}"
+        echo "verify:        ${VERIFY_URL}"
+        echo "badge:         ${BADGE_URL}"
+
+    - name: Write job summary
+      if: inputs.write-summary == 'true'
+      shell: bash
+      env:
+        VERIFY_URL: ${{ steps.anchor.outputs.verify_url }}
+        BADGE_URL: ${{ steps.anchor.outputs.badge_url }}
+        SHEAF_SEQ: ${{ steps.anchor.outputs.sheaf_seq }}
+        ENVELOPE_HASH: ${{ steps.anchor.outputs.envelope_hash }}
+      run: |
+        {
+          echo "## 🔖 Anchored on Sheaf"
+          echo ""
+          echo "[![Sheaf](${BADGE_URL})](${VERIFY_URL})"
+          echo ""
+          echo "| Field | Value |"
+          echo "| --- | --- |"
+          echo "| Seq | \`${SHEAF_SEQ}\` |"
+          echo "| Envelope hash | \`${ENVELOPE_HASH}\` |"
+          echo "| Verify | [${VERIFY_URL}](${VERIFY_URL}) |"
+          echo ""
+          echo "<sub>This workflow run was anchored to Base mainnet through [Sheaf](https://github.com/sheafhq/sheaf). Anchored events are included in the next 15-minute epoch and become independently verifiable at the link above.</sub>"
+        } >> "${GITHUB_STEP_SUMMARY}"
