@@ -9,6 +9,28 @@ import { sha256Hex } from "./canonical.js";
 
 export type Plan = "free" | "pro" | "legacy-public";
 
+/** Monthly anchor cap per chain for a given plan. See brief rev 2.
+ *  Free: 30 anchors/chain/month (~daily cadence).
+ *  Pro:  720 (~hourly).
+ *  legacy-public: no cap — keeps pre-WP2 demo chains alive indefinitely. */
+export function anchorLimitForPlan(plan: Plan): number {
+  switch (plan) {
+    case "pro":
+      return 720;
+    case "legacy-public":
+      return Number.MAX_SAFE_INTEGER;
+    case "free":
+    default:
+      return 30;
+  }
+}
+
+/** Current UTC calendar month as YYYY-MM for the anchor_usage_monthly key. */
+export function currentMonth(): string {
+  const d = new Date();
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
 export type Account = {
   account_id: string;
   email: string | null;
