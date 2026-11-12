@@ -21,6 +21,21 @@ All notable changes to Sheaf packages and the recorder Worker.
 ### @sheafhq/verify (0.1.1 → 0.1.2)
 - CLI tries `https://api.sheafhq.io` first when resolving the recorder public key, falls back to `sheaf-recorder.goldencalf.workers.dev` on error.
 
+## 2026-11-12 — WP6 ephemeral-chain onboarding + proof-of-existence receipt page + human funnel
+
+### @sheafhq/mcp-recorder (0.1.1 → 0.2.0)
+- New subcommand: `npx @sheafhq/mcp-recorder init`. Transparent account creation (operator never sees a signup form), mints a chain_id locally (`agent-<hex>`), posts a first event tagged `tool: "sheaf://init"`, writes `.sheaf/config.json` (safe to commit) + `.sheaf/credentials.json` (0600, auto-added to `.gitignore`), prints verify URL + proof URL + badge + ready-to-paste MCP config snippet for Claude Code/Desktop.
+- `--wrap` mode now auto-loads chain_id + api_key from `.sheaf/` if env vars absent — operators can just run `init` once and wrap any MCP server in the same cwd without configuring env.
+- Event submission now includes `Authorization: Bearer <api_key>` when configured (previously anonymous; works with WP2 chain ownership).
+- End-to-end smoke test: fresh temp dir → `init` → chain `agent-4e9b492a68a8` created on recorder with init event at seq=0.
+
+### Worker (sheaf-recorder)
+- **GET /r/:chain_id/:seq** — public proof-of-existence receipt page. Content-hidden by default: shows receipt exists, chain length, issuer + key_id, anchor tx (if committed) + basescan link, UTC-day-coarse window. Does NOT show tool name, actor, intent, inputs/outputs hashes, exact timestamp. In-browser "Verify" button runs `@sheafhq/verify@0.1.2` via esm.sh against Base mainnet. The receipt URL is the operator's distribution loop; nothing content-level leaks. Opt-in content disclosure is a future per-chain flag.
+- **GET /stats/funnel?window=30d** — human funnel metrics tracking `init_run → first_event → second_event → week_1_retained → upgraded_to_pro`. Keys off `tool='sheaf://init'` on seq=0 events. Replaces the "bot funnel" (template_400 → 402 → paid) as the primary measurement surface — we only have one known paid call and it was a sweep crawler, so the bot funnel is noise.
+
+### Kill gates (pre-committed before measuring)
+Written in task #74 and `feedback_hands_off.md` corollary. Each funnel stage's drop-off indicates a specific problem class and a specific response; conflating them means responding to the wrong problem.
+
 ## 2026-11-12 — Fix A+B: convert agent 400s on /bundle to actionable retries
 
 ### Observed demand signal

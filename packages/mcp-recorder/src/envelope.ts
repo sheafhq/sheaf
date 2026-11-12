@@ -131,9 +131,13 @@ export class RecorderClient {
       };
 
       const body = canonicalize(envelope);
+      const headers: Record<string, string> = { "content-type": "application/json" };
+      if (this.cfg.apiKey) {
+        headers.Authorization = `Bearer ${this.cfg.apiKey}`;
+      }
       const r = await this.fetchWithFallback(`/events`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers,
         body,
       });
       const receipt = (await r.json()) as SubmissionReceipt;
