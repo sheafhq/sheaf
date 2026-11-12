@@ -21,6 +21,22 @@ All notable changes to Sheaf packages and the recorder Worker.
 ### @sheafhq/verify (0.1.1 → 0.1.2)
 - CLI tries `https://api.sheafhq.io` first when resolving the recorder public key, falls back to `sheaf-recorder.goldencalf.workers.dev` on error.
 
+## 2026-11-12 — Coherence weekend experiment (parallel vertical, zero-promotion test)
+
+Separate primitive from the AI-agent audit product. Shares the Sheaf brand (mathematically — cellular sheaves over pipeline graphs) but has its own buyer (DevOps/platform engineer) and its own distribution (GitHub Actions Marketplace + npm search).
+
+### Reference implementation
+- `packages/coherence/cert.py` — 250-line pure-Python coherence engine, zero deps. Builds the cell complex, constructs δ⁰, computes H¹ rank via Gauss-Jordan, reports per-edge seams. Fixtures for coherent and incoherent-artifact-drift cases.
+- `packages/coherence/action.yml` — composite GH Action, uses in-tree as `sheafhq/sheaf/packages/coherence@main`.
+- `packages/coherence/BLOG.md` — technical writeup, serves as the project's landing page when discovered.
+
+### Passive discovery surfaces
+- **npm**: `@sheafhq/coherence@0.1.0` (zero-dep TypeScript port, keywords for sheaf / coherence / cohomology / ci-cd / github-actions / slsa / attestation / provenance).
+- **GitHub Actions Marketplace**: dedicated repo `sheafhq/sheaf-coherence-action` with v0.1.0 tag. **One manual publish-click still pending** from Alexander on the release page to add it to the Marketplace catalog.
+
+### Measurement
+30-day window. ZERO promotion (no HN, no Twitter, no outreach). If any organic star/fork/install/issue appears, the primitive has a hands-off buyer and we build v0.2 (fan-in fixture + proper sparse SVD + Rust engine). Flat = reconciliation primitive thesis fails.
+
 ## 2026-11-11 — WP7b distribution surface
 
 ### packages/anchor-action (GitHub Action, new)
