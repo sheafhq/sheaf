@@ -23,6 +23,7 @@ import {
 } from "./accounts.js";
 import { renderChainPage, type ChainSummary } from "./chain-page.js";
 import { renderBadge } from "./badge.js";
+import { renderReceiptPage, type ReceiptPageData } from "./receipt-page.js";
 import type {
   ChainHead,
   Envelope,
@@ -258,6 +259,165 @@ app.get("/c/:chain_id", async (c) => {
   c.header("Content-Type", "text/html; charset=utf-8");
   c.header("Cache-Control", "public, max-age=30, s-maxage=30");
   return c.body(renderChainPage(summary, base));
+});
+
+// Public proof-of-existence receipt page. Default is content-hidden: we
+// confirm the receipt exists, where it sits in the chain, that the recorder
+// signed it, and (if anchored) what Base tx commits its Merkle root — but
+// NOT the tool name, actor, intent, arguments, or exact timestamp. Receipt
+// URLs are the operator's distribution loop; nothing content-level leaks.
+app.get("/r/:chain_id/:seq", async (c) => {
+  if (!c.env.DB) return c.json({ error: "DB binding missing" }, 500);
+  const chainId = c.req.param("chain_id");
+  const seqStr = c.req.param("seq");
+  if (!chainId) return c.json({ error: "chain_id required" }, 400);
+  const seq = Number.parseInt(seqStr ?? "", 10);
+  if (!Number.isInteger(seq) || seq < 0) {
+    return c.json({ error: "seq must be a non-negative integer" }, 400);
+  }
+  const base = new URL(c.req.url).origin;
+
+  const chainRow = (await c.env.DB.prepare(
+    "SELECT event_count FROM chains WHERE chain_id = ?",
+  )
+    .bind(chainId)
+    .first()) as { event_count: number } | null;
+  const eventRow = chainRow
+    ? ((await c.env.DB.prepare(
+        "SELECT envelope_hash, ts, epoch_id FROM events WHERE chain_id = ? AND seq = ?",
+      )
+        .bind(chainId, seq)
+        .first()) as {
+        envelope_hash: string;
+        ts: number;
+        epoch_id: number | null;
+      } | null)
+    : null;
+  const epochRow = eventRow?.epoch_id !== null && eventRow?.epoch_id !== undefined
+    ? ((await c.env.DB.prepare(
+        "SELECT anchor_tx_hash, anchor_block, merkle_root FROM epochs WHERE epoch_id = ?",
+      )
+        .bind(eventRow.epoch_id)
+        .first()) as {
+        anchor_tx_hash: string | null;
+        anchor_block: number | null;
+        merkle_root: string;
+      } | null)
+    : null;
+
+  const data: ReceiptPageData = {
+    chain_id: chainId,
+    seq,
+    chain: {
+      exists: Boolean(chainRow),
+      event_count: chainRow?.event_count ?? 0,
+      issuer: c.env.ISSUER,
+      issuer_key_id: activeKey().key_id,
+      recorder_public_key: activeKey().public_key_base64,
+    },
+    receipt: {
+      exists: Boolean(eventRow),
+      envelope_hash: eventRow?.envelope_hash ?? null,
+      seq,
+      coarse_window_utc_date: eventRow
+        ? new Date(eventRow.ts * 1000).toISOString().slice(0, 10)
+        : null,
+      epoch_id: eventRow?.epoch_id ?? null,
+      anchor_tx: epochRow?.anchor_tx_hash ?? null,
+      anchor_block: epochRow?.anchor_block ?? null,
+      merkle_root: epochRow?.merkle_root ?? null,
+    },
+  };
+  c.header("Content-Type", "text/html; charset=utf-8");
+  c.header("Cache-Control", "public, max-age=60, s-maxage=60");
+  return c.body(renderReceiptPage(data, base));
+});
+
+// Funnel stats for the WP6 human lifecycle:
+// init_run → first_event → second_event → week_1_retained → upgraded.
+// Measures real humans, not the bot funnel (which is bot_400 → 402 → paid).
+// Query by window: /stats/funnel?window=7d  (default 30d). Returns daily
+// counts suitable for sparkline rendering elsewhere.
+app.get("/stats/funnel", async (c) => {
+  if (!c.env.DB) return c.json({ error: "DB binding missing" }, 500);
+  const windowStr = c.req.query("window") ?? "30d";
+  const m = windowStr.match(/^(\d+)d$/);
+  const days = m ? Math.min(365, Math.max(1, Number.parseInt(m[1]!, 10))) : 30;
+  const nowSec = Math.floor(Date.now() / 1000);
+  const cutoff = nowSec - days * 86400;
+  const week1 = nowSec - 7 * 86400;
+
+  // init_runs: chains whose first event (seq=0) has tool='sheaf://init'
+  // and landed within the window. Count of distinct such chains.
+  const initRows = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM events
+     WHERE seq = 0 AND tool = 'sheaf://init' AND received_at >= ?`,
+  )
+    .bind(cutoff)
+    .first();
+  const initRuns = (initRows?.n as number | undefined) ?? 0;
+
+  // first_event: init'd chains that then recorded at least one more event.
+  const firstEventRows = await c.env.DB.prepare(
+    `SELECT COUNT(DISTINCT c.chain_id) AS n
+     FROM chains c
+     JOIN events e0 ON e0.chain_id = c.chain_id AND e0.seq = 0 AND e0.tool = 'sheaf://init'
+     WHERE e0.received_at >= ? AND c.event_count >= 2`,
+  )
+    .bind(cutoff)
+    .first();
+  const firstEvent = (firstEventRows?.n as number | undefined) ?? 0;
+
+  // second_event: 3+ events total (init + 2 real).
+  const secondEventRows = await c.env.DB.prepare(
+    `SELECT COUNT(DISTINCT c.chain_id) AS n
+     FROM chains c
+     JOIN events e0 ON e0.chain_id = c.chain_id AND e0.seq = 0 AND e0.tool = 'sheaf://init'
+     WHERE e0.received_at >= ? AND c.event_count >= 3`,
+  )
+    .bind(cutoff)
+    .first();
+  const secondEvent = (secondEventRows?.n as number | undefined) ?? 0;
+
+  // week_1_retained: chain with last event >= 7 days AFTER the init event.
+  const retainRows = await c.env.DB.prepare(
+    `SELECT COUNT(DISTINCT c.chain_id) AS n
+     FROM chains c
+     JOIN events e0 ON e0.chain_id = c.chain_id AND e0.seq = 0 AND e0.tool = 'sheaf://init'
+     WHERE e0.received_at >= ? AND c.updated_at - e0.received_at >= 604800`,
+  )
+    .bind(cutoff)
+    .first();
+  const retained = (retainRows?.n as number | undefined) ?? 0;
+
+  // upgraded: accounts on the pro plan (regardless of when they init'd,
+  // because plan changes don't carry a timestamp yet). This is a running
+  // total, not a window count.
+  const upgradedRows = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM accounts WHERE plan = 'pro'`,
+  )
+    .bind()
+    .first();
+  const upgraded = (upgradedRows?.n as number | undefined) ?? 0;
+
+  const rate = (num: number, den: number): number | null =>
+    den === 0 ? null : Math.round((num / den) * 1000) / 1000;
+
+  return c.json({
+    window: `${days}d`,
+    start: new Date(cutoff * 1000).toISOString(),
+    end: new Date(nowSec * 1000).toISOString(),
+    stages: {
+      init_run: { count: initRuns },
+      first_event: { count: firstEvent, rate_from_init: rate(firstEvent, initRuns) },
+      second_event: { count: secondEvent, rate_from_init: rate(secondEvent, initRuns) },
+      week_1_retained: { count: retained, rate_from_init: rate(retained, initRuns) },
+      upgraded_to_pro: { count: upgraded, note: "running total; plan upgrades not timestamped" },
+    },
+    kill_gates: {
+      note: "See claude/sheaf-self-serve-brief.md for pre-committed diagnoses. Each stage's drop-off indicates a different problem class.",
+    },
+  });
 });
 
 app.get("/badge/:slug", async (c) => {

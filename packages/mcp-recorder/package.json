@@ -1,6 +1,6 @@
 {
   "name": "@sheafhq/mcp-recorder",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Transparent MCP (Model Context Protocol) proxy that captures every tool call an agent makes and emits signed, hash-chained, on-chain-anchored receipts via the Sheaf recorder. Zero-code install via claude_desktop_config.json.",
   "type": "module",
   "main": "./dist/cli.js",
