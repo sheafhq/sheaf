@@ -21,6 +21,26 @@ All notable changes to Sheaf packages and the recorder Worker.
 ### @sheafhq/verify (0.1.1 → 0.1.2)
 - CLI tries `https://api.sheafhq.io` first when resolving the recorder public key, falls back to `sheaf-recorder.goldencalf.workers.dev` on error.
 
+## 2026-11-12 — Fix A+B: convert agent 400s on /bundle to actionable retries
+
+### Observed demand signal
+Analytics Engine + on-chain data (2026-11-11): ~30 agent requests in 2 hours hit `/bundle` with unsubstituted path templates (`:chain_id`, `{chain_id}`, `:seq`, `{seq}`). Current response was HTTP 400 "seq must be a non-negative integer" — accurate but useless. One agent that did substitute real values paid $0.001 USDC successfully (tx `0xe7cef1076cf92e2326f407a94f1c740b4fcd5de0c8a484ec33388446686787aa` from wallet `0xa1d1c0cf7174...`). First external paid call on either product. Demand exists; the UX was blocking conversion.
+
+### Fix A — concrete working examples in root /
+`GET /` now returns a `quickstart.try_this` field with a literal paid-bundle URL, plus per-endpoint `example` fields with real substituted values. Agents parsing the service manifest get working URLs, not patterns to substitute.
+
+### Fix B — detect unsubstituted path parameters at /bundle
+Pre-paywall middleware on `/bundle/:chain_id/:seq` now detects five template-placeholder patterns and returns a structured 400 with `you_sent`, `try_this` (a working example URL), and a plain-English `hint`. Agents parsing the error body self-correct on retry.
+
+Four test cases verified live:
+- `:chain_id/:seq` → structured 400 with hint
+- `{chain_id}/{seq}` → structured 400 with hint
+- `smoke-test-1/:seq` (one substituted) → structured 400
+- `smoke-test-1/0` → 402 payment-required (unchanged, correct)
+
+### Measurement
+7-day window on Analytics Engine: watch the ratio of `/bundle/*` 400s → 402s → 201s. If retries materialize as paid calls, the conversion hypothesis holds and Sheaf audit is the product to double down on.
+
 ## 2026-11-12 — Coherence weekend experiment (parallel vertical, zero-promotion test)
 
 Separate primitive from the AI-agent audit product. Shares the Sheaf brand (mathematically — cellular sheaves over pipeline graphs) but has its own buyer (DevOps/platform engineer) and its own distribution (GitHub Actions Marketplace + npm search).
