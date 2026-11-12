@@ -21,9 +21,19 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { installGlobalScrubber } from "./scrub.js";
 import { runProxy } from "./proxy.js";
 import { runInit } from "./init.js";
 import type { RecorderConfig } from "./types.js";
+
+// Install the key scrubber BEFORE anything else can print. Any Sheaf API key
+// written to stdout, stderr, console.*, or thrown in an error message is
+// rewritten to [REDACTED_SHEAF_KEY] — prevents the smoke-test leak class
+// from recurring. Init's intentional "key display" paths are not stdout; the
+// key goes to .sheaf/credentials.json on disk (chmod 600) and the MCP
+// config snippet goes to .sheaf/mcp-config.json. Scrubber cannot touch
+// files, so operators still have access to their own secrets.
+installGlobalScrubber();
 
 const argv = process.argv.slice(2);
 

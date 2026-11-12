@@ -21,6 +21,33 @@ All notable changes to Sheaf packages and the recorder Worker.
 ### @sheafhq/verify (0.1.1 → 0.1.2)
 - CLI tries `https://api.sheafhq.io` first when resolving the recorder public key, falls back to `sheaf-recorder.goldencalf.workers.dev` on error.
 
+## 2026-11-12 — Credential leak response: scrub, revoke, rename prefix
+
+A WP6 smoke test earlier today printed a real `sk_live_` API key into the session transcript. Incident response, all in this commit:
+
+### Revoked (preserves chain + audit history)
+- `POST /accounts/me/keys/revoke` — new self-revoke endpoint. Proof of possession = authorization. Soft-sets `api_keys.revoked_at`. Chain `agent-4e9b492a68a8` and its one event are preserved; only future auth is disabled.
+- Verified: leaked key returned HTTP 200 on `/usage` pre-revoke, HTTP 401 immediately after. No cache invalidation needed — Worker reads D1 fresh per request.
+
+### Scrubbed
+- `@sheafhq/mcp-recorder@0.2.1` — new `src/scrub.ts` module with regex `/(?:sk|shf)_(?:live|test)_[a-f0-9]{32,}/g`. `installGlobalScrubber()` wraps `console.log`, `console.error`, `console.warn`, `console.info`, `process.stdout.write`, `process.stderr.write`, `uncaughtException`, `unhandledRejection`. Installed first thing in `cli.ts`.
+- `init` output changed: API key NO LONGER printed to stdout. MCP config snippet is written to `.sheaf/mcp-config.json` (0600). Terminal prints "cat .sheaf/mcp-config.json to see the key."
+- 9 tests in `test/scrub.test.mjs` — stdout, stderr, Error serialization, nested objects, legacy + current prefix. All pass.
+
+### Renamed (reduces grep confusion with Stripe)
+- New key prefix: `shf_live_` (was `sk_live_`). Emitted by `KEY_PREFIX` in `src/accounts.ts`.
+- `ACCEPTED_KEY_PREFIXES = ["shf_live_", "sk_live_"]` — old keys still authenticate (lookup hashes the key as-is; stored hashes unaffected).
+- `isValidKeyShape()` helper accepts both prefixes.
+
+### Grep sweep (all clean)
+- Working dir `C:/dev/sheaf`: 0 hits
+- The exact leaked key suffix: 0 hits outside this CHANGELOG entry (which only references the account_id, not the key)
+- `sheafhq/sheaf` git log (last 7 days): 0 hits
+- `sheafhq/sheaf-coherence-action` git log (last 7 days): 0 hits
+- All memory files: 0 hits
+- Recent 10 CI run logs: 0 hits
+- Only extant reservoir: the Claude Code session transcript on Alexander's local disk (expected; scrubber prevents recurrence)
+
 ## 2026-11-12 — WP6 ephemeral-chain onboarding + proof-of-existence receipt page + human funnel
 
 ### @sheafhq/mcp-recorder (0.1.1 → 0.2.0)

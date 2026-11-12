@@ -19,6 +19,7 @@ import {
   LEGACY_ACCOUNT_ID,
   lookupAccountByKey,
   parseBearer,
+  revokeKey,
   type Plan,
 } from "./accounts.js";
 import { renderChainPage, type ChainSummary } from "./chain-page.js";
@@ -981,6 +982,29 @@ app.post("/admin/anchor", async (c) => {
     anchor_tx_hash: result.anchor_tx_hash,
     base_explorer: `https://basescan.org/tx/${result.anchor_tx_hash}`,
     skipped: result.skipped,
+  });
+});
+
+// Self-revocation: authenticated holder of a key can revoke it. Proof of
+// possession = authorization. Soft-revoke (sets revoked_at), preserving the
+// chain + audit history. The key is immediately unauthenticated for future
+// calls (lookupAccountByKey filters WHERE revoked_at IS NULL).
+app.post("/accounts/me/keys/revoke", async (c) => {
+  if (!c.env.DB) return c.json({ error: "DB binding missing" }, 500);
+  const bearer = parseBearer(c.req.header("Authorization"));
+  if (!bearer) return c.json({ error: "Bearer API key required" }, 401);
+  const result = await revokeKey(c.env.DB, bearer);
+  if (!result.revoked && !result.already_revoked) {
+    return c.json({ ok: false, error: "key not found" }, 404);
+  }
+  return c.json({
+    ok: true,
+    revoked_now: result.revoked,
+    already_revoked: result.already_revoked,
+    account_id: result.account_id,
+    revoked_at_unix: result.revoked_at_unix,
+    note:
+      "This key is immediately disabled for future requests. The chain + audit history are preserved. Create a new key via POST /accounts if you need to continue operating this account.",
   });
 });
 
