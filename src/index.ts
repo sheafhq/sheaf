@@ -99,8 +99,9 @@ app.use(async (c, next) => {
   } catch {}
 });
 
-app.get("/", (c) =>
-  c.json({
+app.get("/", (c) => {
+  const origin = new URL(c.req.url).origin;
+  return c.json({
     service: "sheaf",
     description:
       "Third-party execution recorder for AI agents. Hash-chained, Merkle-anchored, independently verifiable receipts.",
@@ -109,17 +110,26 @@ app.get("/", (c) =>
     architecture_doc: "https://github.com/sheafhq/sheaf/blob/main/ARCHITECTURE.md",
     canonical_base_url: "https://api.sheafhq.io",
     legacy_base_url: "https://sheaf-recorder.goldencalf.workers.dev",
+    // Fix A (2026-11-12): give agents a concrete, working URL so OpenAPI
+    // consumers don't send literal template strings in the path.
+    quickstart: {
+      try_this: `${origin}/bundle/smoke-test-1/0`,
+      note: "That URL returns a 402 payment-required response with x402 metadata; pay $0.001 USDC on Base and the bundle is returned. For free reads replace /bundle/ with /events/ or /chains/head/.",
+      example_free: `${origin}/chains/smoke-test-1/head`,
+      example_verify_page: `${origin}/c/smoke-test-1`,
+    },
     endpoints: {
       free: [
-        "POST /events — submit a signed envelope; recorder co-signs and chains it",
-        "GET /events/:chain_id/:seq — fetch stored envelope",
-        "GET /chains/:chain_id/head — current head of a chain",
-        "GET /epoch/:epoch_id/proof/:chain_id/:seq — Merkle inclusion proof",
-        "GET /.well-known/sheaf-public-key — issuer public keys",
-        "GET /verify — browser drag-drop verifier (HTML page)",
+        { pattern: "POST /events", example: `${origin}/events`, note: "submit a signed envelope; recorder co-signs and chains it" },
+        { pattern: "GET /events/{chain_id}/{seq}", example: `${origin}/events/smoke-test-1/0`, note: "fetch stored envelope" },
+        { pattern: "GET /chains/{chain_id}/head", example: `${origin}/chains/smoke-test-1/head`, note: "current head of a chain" },
+        { pattern: "GET /epoch/{epoch_id}/proof/{chain_id}/{seq}", example: `${origin}/epoch/0/proof/smoke-test-1/0`, note: "Merkle inclusion proof" },
+        { pattern: "GET /.well-known/sheaf-public-key", example: `${origin}/.well-known/sheaf-public-key`, note: "issuer public keys" },
+        { pattern: "GET /verify", example: `${origin}/verify`, note: "browser drag-drop verifier (HTML page)" },
+        { pattern: "GET /c/{chain_id}", example: `${origin}/c/smoke-test-1`, note: "public verification page for one chain" },
       ],
       paid: [
-        "GET /bundle/:chain_id/:seq — self-contained verifiable .sheaf bundle ($0.001)",
+        { pattern: "GET /bundle/{chain_id}/{seq}", example: `${origin}/bundle/smoke-test-1/0`, note: "self-contained verifiable .sheaf bundle ($0.001 USDC on Base via x402)" },
       ],
     },
     issuer: c.env.ISSUER,
@@ -134,8 +144,8 @@ app.get("/", (c) =>
       pay_to: c.env.PAYOUT_ADDRESS,
       facilitator: c.env.FACILITATOR_URL,
     },
-  }),
-);
+  });
+});
 
 // Browser-based drag-drop verifier. Pure static HTML; verification runs
 // client-side against a public Base RPC + the recorder public key embedded
@@ -1065,16 +1075,56 @@ const bundleDiscovery = declareDiscoveryExtension({
   },
 });
 
+// Fix B (2026-11-12): detect unsubstituted path-parameter templates.
+// Analytics Engine showed ~30 agents in 2 hours hitting /bundle with the
+// literal placeholder strings (":chain_id", "{chain_id}", ":seq", "{seq}")
+// after reading our OpenAPI spec and not performing the substitution.
+// Return a structured hint with a working example URL so retries succeed.
+const BUNDLE_EXAMPLE_PATH = "/bundle/smoke-test-1/0";
+function looksLikeTemplate(s: string): boolean {
+  return (
+    s.startsWith(":") ||
+    s.startsWith("%3A") ||
+    s.startsWith("{") ||
+    s.endsWith("}") ||
+    s === "chain_id" ||
+    s === "seq"
+  );
+}
+
 // Pre-paywall validator: if the event doesn't exist or isn't anchored yet,
 // return the error without charging. If it's ready, build the bundle and
 // stash it in context for the handler to return.
 app.use("/bundle/:chain_id/:seq", async (c, next) => {
   if (!c.env.DB) return c.json({ error: "DB binding missing" }, 500);
-  const chainId = c.req.param("chain_id");
-  const seqStr = c.req.param("seq");
+  const chainId = c.req.param("chain_id") ?? "";
+  const seqStr = c.req.param("seq") ?? "";
+  const origin = new URL(c.req.url).origin;
+
+  if (looksLikeTemplate(chainId) || looksLikeTemplate(seqStr)) {
+    return c.json(
+      {
+        error: "path parameters were not substituted",
+        you_sent: c.req.path,
+        try_this: origin + BUNDLE_EXAMPLE_PATH,
+        hint: "The path pattern /bundle/{chain_id}/{seq} is a TEMPLATE. Replace {chain_id} with a real chain (e.g. 'smoke-test-1') and {seq} with a non-negative integer (e.g. 0) before calling. Browse chains via GET " + origin + "/ for examples.",
+        docs: "https://github.com/sheafhq/sheaf#bundles",
+      },
+      400,
+    );
+  }
+
   const seq = Number.parseInt(seqStr, 10);
   if (!Number.isInteger(seq) || seq < 0) {
-    return c.json({ error: "seq must be a non-negative integer" }, 400);
+    return c.json(
+      {
+        error: "seq must be a non-negative integer",
+        you_sent: c.req.path,
+        try_this: origin + BUNDLE_EXAMPLE_PATH,
+        hint: `Got seq="${seqStr}". Replace with an integer (e.g. 0, 1, 2) from the chain's sequence.`,
+      },
+      400,
+    );
   }
   const publicKeyUrl =
     new URL(c.req.url).origin + "/.well-known/sheaf-public-key";
