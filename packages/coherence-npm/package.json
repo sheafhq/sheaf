@@ -1,0 +1,51 @@
+{
+  "name": "@sheafhq/coherence",
+  "version": "0.1.0",
+  "description": "Cohomological coherence certificate for CI/CD pipelines. Reads a JSON of your pipeline (commit → build → test → deploy events), constructs a cellular sheaf, computes H¹, emits a certificate naming which edges break coherence. Catches the 'our tests passed but prod used a different artifact' failure mode that provenance/attestation tools don't explicitly check. Zero deps, pure TypeScript port of the reference Python implementation.",
+  "type": "module",
+  "main": "./dist/cli.js",
+  "bin": {
+    "sheaf-coherence": "dist/cli.js"
+  },
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "sheaf",
+    "coherence",
+    "cohomology",
+    "ci-cd",
+    "ci",
+    "cd",
+    "github-actions",
+    "provenance",
+    "verification",
+    "slsa",
+    "attestation",
+    "evidence",
+    "pipeline",
+    "artifact-drift"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sheafhq/sheaf.git",
+    "directory": "packages/coherence-npm"
+  },
+  "homepage": "https://github.com/sheafhq/sheaf/tree/main/packages/coherence",
+  "bugs": {
+    "url": "https://github.com/sheafhq/sheaf/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "@types/node": "^22.0.0"
+  }
+}
