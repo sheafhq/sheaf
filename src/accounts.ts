@@ -64,9 +64,29 @@ export function generateAccountId(): string {
   return "acct_" + randomHex(8);
 }
 
+/** Sheaf key prefix. Changed 2026-11-12 from `sk_live_` to `shf_live_` so
+ *  the key cannot be mistaken for a Stripe secret key in logs / search /
+ *  scrubbers. Old `sk_live_` keys still authenticate (lookup hashes the key
+ *  as-is and the stored hash still matches) — only new keys mint as shf_. */
+export const KEY_PREFIX = "shf_live_";
+
+/** Any key format Sheaf has ever issued. Lookup accepts either; generator
+ *  emits only the current KEY_PREFIX. */
+export const ACCEPTED_KEY_PREFIXES = ["shf_live_", "sk_live_"] as const;
+
+/** Is this plaintext a well-formed Sheaf API key? */
+export function isValidKeyShape(s: string): boolean {
+  for (const pfx of ACCEPTED_KEY_PREFIXES) {
+    if (s.startsWith(pfx) && /^[a-f0-9]{64}$/.test(s.slice(pfx.length))) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /** Generate an API key + its storage hash. The key is shown to the user once. */
 export async function generateApiKey(): Promise<{ key: string; hash: string }> {
-  const key = "sk_live_" + randomHex(32);
+  const key = KEY_PREFIX + randomHex(32);
   const hash = await sha256Hex(key);
   return { key, hash };
 }
@@ -138,6 +158,39 @@ export async function createAccount(
     },
     api_key: key,
   };
+}
+
+/** Soft-revoke an API key (sets revoked_at = now). Returns true if a row was
+ *  updated, false if the key wasn't found or was already revoked. Preserves
+ *  the chain + audit history; only disables future authentication. */
+export async function revokeKey(
+  db: Db,
+  plaintextKey: string,
+): Promise<{ revoked: boolean; already_revoked: boolean; account_id: string | null; revoked_at_unix: number | null }> {
+  const keyHash = await sha256Hex(plaintextKey);
+  const now = Math.floor(Date.now() / 1000);
+  const existing = (await db
+    .prepare(
+      "SELECT account_id, revoked_at FROM api_keys WHERE key_hash = ?",
+    )
+    .bind(keyHash)
+    .first()) as { account_id: string; revoked_at: number | null } | null;
+  if (!existing) {
+    return { revoked: false, already_revoked: false, account_id: null, revoked_at_unix: null };
+  }
+  if (existing.revoked_at !== null) {
+    return {
+      revoked: false,
+      already_revoked: true,
+      account_id: existing.account_id,
+      revoked_at_unix: existing.revoked_at,
+    };
+  }
+  await db
+    .prepare("UPDATE api_keys SET revoked_at = ? WHERE key_hash = ?")
+    .bind(now, keyHash)
+    .run();
+  return { revoked: true, already_revoked: false, account_id: existing.account_id, revoked_at_unix: now };
 }
 
 /** Look up the owner of an existing chain. Returns null if chain doesn't exist. */

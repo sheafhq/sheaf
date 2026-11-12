@@ -131,7 +131,15 @@ function ensureGitignoreEntry(cwd: string): { changed: boolean; path: string } {
   return { changed: true, path: gi };
 }
 
-function printMcpConfigSnippet(opts: { chainId: string; apiKey: string }): void {
+/** Build the MCP config snippet containing the real API key, write it to
+ *  .sheaf/mcp-config.json, return the path. Does NOT print the key to
+ *  stdout — the scrubber would redact it anyway, and we don't want secrets
+ *  in terminal scrollback or session transcripts. */
+function writeMcpConfigSnippet(opts: {
+  chainId: string;
+  apiKey: string;
+  sheafDir: string;
+}): string {
   const snippet = {
     mcpServers: {
       "my-filesystem": {
@@ -152,9 +160,12 @@ function printMcpConfigSnippet(opts: { chainId: string; apiKey: string }): void 
       },
     },
   };
-  console.log("Paste into your claude_desktop_config.json (or equivalent):");
-  console.log("");
-  console.log(JSON.stringify(snippet, null, 2));
+  const path = join(opts.sheafDir, "mcp-config.json");
+  writeFileSync(path, JSON.stringify(snippet, null, 2));
+  try {
+    chmodSync(path, 0o600);
+  } catch {}
+  return path;
 }
 
 export async function runInit(cfg: InitConfig): Promise<void> {
@@ -232,6 +243,12 @@ export async function runInit(cfg: InitConfig): Promise<void> {
   const proofUrl = `${baseUrl}/r/${encodeURIComponent(chainId)}/0`;
   const badgeMd = `[![sheaf](${baseUrl}/badge/${encodeURIComponent(chainId)}.svg)](${verifyUrl})`;
 
+  const mcpConfigPath = writeMcpConfigSnippet({
+    chainId,
+    apiKey,
+    sheafDir,
+  });
+
   console.log("");
   console.log("✓ Sheaf chain created");
   console.log("");
@@ -243,8 +260,12 @@ export async function runInit(cfg: InitConfig): Promise<void> {
   console.log("");
   console.log(`  config saved  ${configPath}`);
   console.log(`  credentials   ${credsPath} (0600${gi.changed ? "; added to .gitignore" : "; .gitignore already covered it"})`);
+  console.log(`  MCP snippet   ${mcpConfigPath} (0600; contains your api_key)`);
   console.log("");
-  printMcpConfigSnippet({ chainId, apiKey });
+  console.log(`API key was NOT printed to this terminal (Sheaf keys are scrubbed`);
+  console.log(`from stdout to prevent transcript leaks). To wire it into Claude`);
+  console.log(`Desktop, open:   cat ${mcpConfigPath}`);
+  console.log(`and paste the "mcpServers" block into claude_desktop_config.json.`);
   console.log("");
   console.log(`Next: run your agent against the wrapped server. Every tools/call,`);
   console.log(`resources/read, and sampling/createMessage gets signed, hash-chained,`);
