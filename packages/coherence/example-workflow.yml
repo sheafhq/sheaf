@@ -1,0 +1,47 @@
+# Example of using sheafhq/sheaf-coherence in your own pipeline.
+# Copy this to .github/workflows/coherence.yml in any repo.
+#
+# Prerequisites:
+#  1. Your pipeline emits an evidence JSON (see fixtures/coherent.json shape).
+#  2. You either commit the evidence file, or produce it in an earlier step.
+#
+# Fails the workflow if the pipeline's build/test/deploy evidence is not
+# globally consistent — i.e., the artifact you tested is not the one you
+# deployed, or the commit SHA you built does not match the one recorded.
+
+name: Coherence check
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Replace this step with however your pipeline produces evidence.
+      # The output file must match the fixture schema (see fixtures/ in sheaf).
+      - name: Build evidence JSON for this run
+        run: |
+          cat > evidence.json <<EOF
+          {
+            "fixture_name": "run-${{ github.run_id }}",
+            "events": [
+              {
+                "id": "c1",
+                "type": "Commit",
+                "ts": $(date -u +%s),
+                "sha": "${{ github.sha }}"
+              }
+            ]
+          }
+          EOF
+
+      - name: Run coherence check
+        uses: sheafhq/sheaf/packages/coherence@main
+        with:
+          evidence: evidence.json
+          fail-on-incoherent: 'true'
