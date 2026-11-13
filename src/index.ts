@@ -985,14 +985,43 @@ app.post("/admin/anchor", async (c) => {
   });
 });
 
-// Self-revocation: authenticated holder of a key can revoke it. Proof of
+// Self-revocation: authenticated holder of a key can revoke IT. Proof of
 // possession = authorization. Soft-revoke (sets revoked_at), preserving the
 // chain + audit history. The key is immediately unauthenticated for future
 // calls (lookupAccountByKey filters WHERE revoked_at IS NULL).
+//
+// Boundary: this endpoint ONLY revokes the key presented in the Authorization
+// header. It does NOT accept a target-selection body (no key_hash, no
+// account_id). Any such field in the body causes an immediate 400. This
+// prevents a confused-deputy attempt where account A uses its own auth and
+// tries to revoke account B's key via a body field. See
+// `test/security/self-revoke-boundary.sh` for the regression test.
 app.post("/accounts/me/keys/revoke", async (c) => {
   if (!c.env.DB) return c.json({ error: "DB binding missing" }, 500);
   const bearer = parseBearer(c.req.header("Authorization"));
   if (!bearer) return c.json({ error: "Bearer API key required" }, 401);
+
+  // Reject any body that tries to target a different key / account. The
+  // only acceptable bodies are empty, "{}", or "{confirm: true}".
+  let body: Record<string, unknown> = {};
+  try {
+    const raw = await c.req.text();
+    if (raw.trim()) body = JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return c.json({ error: "invalid JSON body" }, 400);
+  }
+  const extraFields = Object.keys(body).filter((k) => k !== "confirm");
+  if (extraFields.length > 0) {
+    return c.json(
+      {
+        error:
+          "self-revoke takes no target selector. The only key revoked is the one in the Authorization header. To revoke a different key, authenticate with that key and call this endpoint again.",
+        rejected_fields: extraFields,
+      },
+      400,
+    );
+  }
+
   const result = await revokeKey(c.env.DB, bearer);
   if (!result.revoked && !result.already_revoked) {
     return c.json({ ok: false, error: "key not found" }, 404);

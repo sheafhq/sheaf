@@ -21,6 +21,17 @@ All notable changes to Sheaf packages and the recorder Worker.
 ### @sheafhq/verify (0.1.1 → 0.1.2)
 - CLI tries `https://api.sheafhq.io` first when resolving the recorder public key, falls back to `sheaf-recorder.goldencalf.workers.dev` on error.
 
+## 2026-11-13 — Leak-response follow-up: boundary test, scrubber coverage, keyspace docs
+
+### Self-revoke boundary hardened (regression test added)
+`POST /accounts/me/keys/revoke` now rejects any body with target-selector fields (`key_hash`, `account_id`, etc.) with HTTP 400 and a `rejected_fields` list. Previously the body was silently ignored; the bearer was still the only thing revoked, but the semantics were surprising. Shell test at `test/security/inline-boundary.sh` provisions two throwaway accounts, confirms three cross-account revoke attempts all return 400, and verifies both A and B keys remain functional after the rejected attempts. All 7 sub-tests pass against live `api.sheafhq.io`.
+
+### Scrubber coverage test (regression)
+`test/scrub.test.mjs` extended with two new tests: "scrubber catches every historical key format emitted by accounts.ts" (iterates `ALL_PREFIXES_EVER_EMITTED` × suffix variants) and "scrubber catches keys in adversarial contexts" (URL query, JSON value, Bearer header, YAML, multiline env, bare key). 11/11 pass.
+
+### Keyspace semantics clarified (code comment + this entry)
+The SHA-256 hash in `api_keys.key_hash` is computed over the WHOLE key string INCLUDING the prefix. So `sk_live_<X>` and `shf_live_<X>` hash to DIFFERENT values and are DIFFERENT credentials — the prefix is NOT display-only. This is the opposite of what was assumed in the initial leak-response write-up. Documented verbatim in `src/accounts.ts::generateApiKey` with a block comment warning any future contributor against sneaking in a prefix-stripped change. Prefix-independent lookup, if ever wanted, requires a deliberate migration (backfill or dual-lookup) — not a one-line edit.
+
 ## 2026-11-12 — Credential leak response: scrub, revoke, rename prefix
 
 A WP6 smoke test earlier today printed a real `sk_live_` API key into the session transcript. Incident response, all in this commit:

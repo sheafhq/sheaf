@@ -77,6 +77,63 @@ test("installGlobalScrubber redacts via console.error", () => {
   assert.ok(!joined.includes(k));
 });
 
+// Coverage test: assert every historical Sheaf key format is caught by the
+// scrubber regex. If a new format is added in accounts.ts, this test fails
+// until the scrubber regex is widened. Added 2026-11-12 after the sk_live_
+// leak incident.
+test("scrubber catches every historical key format emitted by accounts.ts", () => {
+  // Pull current + legacy prefixes from server-side accounts.ts. Kept in
+  // sync manually; if a new prefix is added there, add it here too and
+  // widen the scrub.ts KEY_PATTERNS array to match.
+  const ALL_PREFIXES_EVER_EMITTED = [
+    "sk_live_",   // legacy (pre-2026-11-12)
+    "shf_live_",  // current (post-2026-11-12)
+  ];
+  // Historical suffix formats: 64 lowercase hex. If this ever changes
+  // (e.g. base32, longer, uppercase), add variants to this list.
+  const SUFFIX_VARIANTS = [
+    "a".repeat(64),                        // all-a
+    "0123456789abcdef".repeat(4),          // every hex digit
+    "f".repeat(64),                        // all-f
+    "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789", // mixed
+  ];
+  for (const pfx of ALL_PREFIXES_EVER_EMITTED) {
+    for (const suf of SUFFIX_VARIANTS) {
+      const key = pfx + suf;
+      const scrubbed = scrubSecrets(`before ${key} after`);
+      assert.ok(
+        scrubbed.includes("[REDACTED_SHEAF_KEY]"),
+        `scrubber failed to catch format ${pfx}<64hex>; got: ${scrubbed}`,
+      );
+      assert.ok(
+        !scrubbed.includes(key),
+        `raw key leaked through scrubber for format ${pfx}<64hex>`,
+      );
+    }
+  }
+});
+
+// Tighter adversarial variants — surround/embed keys in patterns that
+// might confuse a naive regex.
+test("scrubber catches keys in adversarial contexts", () => {
+  const key = "shf_live_" + "a".repeat(64);
+  const cases = [
+    { ctx: `url: https://api.sheafhq.io/?token=${key}&foo=bar`, where: "URL query string" },
+    { ctx: `json: {"api_key":"${key}"}`, where: "JSON value" },
+    { ctx: `header: Authorization: Bearer ${key}`, where: "Bearer header" },
+    { ctx: `yaml:\n  key: ${key}\n`, where: "YAML value" },
+    { ctx: `multiline\nkey=${key}\nnext line`, where: "multiline env" },
+    { ctx: `${key}`, where: "bare key" },
+  ];
+  for (const { ctx, where } of cases) {
+    const scrubbed = scrubSecrets(ctx);
+    assert.ok(
+      !scrubbed.includes(key),
+      `raw key leaked in ${where}: ${scrubbed}`,
+    );
+  }
+});
+
 test("installGlobalScrubber redacts errors with stack traces", () => {
   _resetInstalledForTest();
   const captured = [];
