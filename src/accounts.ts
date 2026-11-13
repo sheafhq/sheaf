@@ -84,7 +84,30 @@ export function isValidKeyShape(s: string): boolean {
   return false;
 }
 
-/** Generate an API key + its storage hash. The key is shown to the user once. */
+/** Generate an API key + its storage hash. The key is shown to the user once.
+ *
+ * KEYSPACE SEMANTICS (important — read before refactoring):
+ *
+ * The hash is computed over the WHOLE key string including the prefix.
+ * That means `sk_live_<suffix>` and `shf_live_<suffix>` hash to DIFFERENT
+ * values and are DIFFERENT keys — not the same key displayed two ways.
+ * The prefix is NOT display-only; it carries hash-domain separation.
+ *
+ * Consequence:
+ *   - A key issued historically as `sk_live_...` continues to authenticate
+ *     because the stored hash was computed with the sk_live_ prefix, and
+ *     the client presents the key with that same prefix. lookupAccountByKey
+ *     hashes whatever bearer string arrives.
+ *   - A new key issued today comes out as `shf_live_...` with a hash
+ *     derived from the shf_live_ prefix.
+ *   - You CANNOT swap prefixes on a key: `sk_live_X` and `shf_live_X` are
+ *     not the same credential, even with identical suffixes.
+ *
+ * If you ever want prefix-independent lookup (to let `sk_live_X` and
+ * `shf_live_X` be the same credential), you must either (a) backfill all
+ * existing api_keys rows with a new prefix-stripped hash, or (b) do a
+ * dual-lookup on the lookup path. Both are deliberate migrations; do not
+ * sneak them in by changing this function alone. */
 export async function generateApiKey(): Promise<{ key: string; hash: string }> {
   const key = KEY_PREFIX + randomHex(32);
   const hash = await sha256Hex(key);
@@ -159,6 +182,19 @@ export async function createAccount(
     api_key: key,
   };
 }
+
+// TODO (post-WP4): admin-authenticated revoke path. Current `revokeKey` is
+// only reachable through `POST /accounts/me/keys/revoke`, which requires
+// possession of the key being revoked. If an operator loses the key (lost
+// laptop, accidental deletion, forgotten rotation) or has it stolen without
+// detecting the compromise, they have no way to revoke it. Need either:
+//   (a) email-based reset (requires accounts.email to be set — currently
+//       optional; Stripe-billed Pro accounts in WP4 will have it mandatory)
+//   (b) stripe_customer_id-based admin action gated by a Stripe-verified
+//       support session
+//   (c) manual ops channel (dangerous — SSRF-prone)
+// Build when a real operator actually asks. Until then, the self-revoke
+// path is the only revocation method and that is documented as a limitation.
 
 /** Soft-revoke an API key (sets revoked_at = now). Returns true if a row was
  *  updated, false if the key wasn't found or was already revoked. Preserves
