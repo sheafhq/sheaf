@@ -12,7 +12,15 @@ import type {
 export * from "./types.js";
 export { canonicalize, sha256Hex, hashCanonical } from "./canonical.js";
 export { computeRootFromProof } from "./merkle.js";
-export { verifyEd25519 } from "./signature.js";
+export {
+  verifyEd25519,
+  decodeCanonicalBase64,
+  isCanonicalEd25519Point,
+  isSmallOrderEd25519,
+  decodeEd25519Point,
+  strictEd25519Reason,
+  keyFingerprint,
+} from "./signature.js";
 export { fetchAnchorTx, fetchChainId } from "./anchor.js";
 export { verifyDisclosures } from "./disclosures.js";
 export * from "./evidence.js";

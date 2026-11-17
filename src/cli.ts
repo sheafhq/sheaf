@@ -17,13 +17,17 @@ import {
   validatePolicy,
   verifyDisputeBundle,
   type TrustStore,
+  type TrustedSigner,
   type VerifyDisputeOptions,
 } from "../packages/verify/dist/index.js";
 import { parseArchiveJsonl } from "./archive.js";
 import { initCase, validateCase } from "./authoring.js";
 import { discloseRange, type DisclosureSet } from "./disclose.js";
 import {
+  LocalSigningError,
   prepareLocalExport,
+  recorderPublicKeys,
+  signDocumentWithPrincipalKey,
   syncLocalAnchor,
 } from "./local.js";
 import {
@@ -49,6 +53,10 @@ type Flags = {
   rpc?: string;
   trustPath?: string;
   policyPath?: string;
+  keyPath?: string;
+  keyId?: string;
+  signersPath?: string;
+  requireVerifiedAuthorisation: boolean;
   offline: boolean;
   strict: boolean;
   selfCheck: boolean;
@@ -62,6 +70,7 @@ type Flags = {
 function parseFlags(argv: string[]): Flags {
   const flags: Flags = {
     localMode: false,
+    requireVerifiedAuthorisation: false,
     offline: false,
     strict: false,
     selfCheck: false,
@@ -81,6 +90,11 @@ function parseFlags(argv: string[]): Flags {
     else if (arg === "--rpc") flags.rpc = argv[++i] ?? "";
     else if (arg === "--trust") flags.trustPath = argv[++i] ?? "";
     else if (arg === "--policy") flags.policyPath = argv[++i] ?? "";
+    else if (arg === "--key") flags.keyPath = argv[++i] ?? "";
+    else if (arg === "--key-id") flags.keyId = argv[++i] ?? "";
+    else if (arg === "--signers") flags.signersPath = argv[++i] ?? "";
+    else if (arg === "--require-verified-authorisation")
+      flags.requireVerifiedAuthorisation = true;
     else if (arg === "--offline") flags.offline = true;
     else if (arg === "--strict") flags.strict = true;
     else if (arg === "--self-check") flags.selfCheck = true;
@@ -104,6 +118,7 @@ function help(): string {
     "  sheaf dispute verify <bundle.sheaf> [options]",
     "  sheaf local export --chain-dir <dir> --case <case.json> --out <bundle.sheaf>",
     "  sheaf local sync --chain-dir <dir>",
+    "  sheaf local sign-document <document.json> --key <principal.pem> --key-id <id> [--out <path>] [--chain-dir <dir>]",
     "",
     "init-case options:",
     "  --force            overwrite scaffold files in a non-empty directory",
@@ -130,6 +145,9 @@ function help(): string {
     "  --allow-unconfirmed-anchor     exit 0 when offline integrity is valid",
     "  --strict                       fail on placeholders or incomplete evidence",
     "  --trust <path>                 testing only: pinned {recorder_keys, anchorers}",
+    "  --signers <path>               relying-party signer pins (sheaf.trusted-signers/1);",
+    "                                 the only way a signature counts as an authenticated principal",
+    "  --require-verified-authorisation  exit 1 unless authorisation is \"verified\"",
     "",
     "local options:",
     "  --chain-dir <dir>  local .sheaf directory (default ./.sheaf)",
@@ -505,6 +523,17 @@ async function exportBundle(flags: Flags): Promise<number> {
   return 0;
 }
 
+/** Relying-party signer pins: { schema: "sheaf.trusted-signers/1", signers: [...] }.
+ *  The verifier validates each entry and ignores (with a warning) any that is
+ *  malformed, weak, or a recorder key. */
+function loadTrustedSigners(path: string): TrustedSigner[] {
+  const doc = readJson(path);
+  if (doc?.schema !== "sheaf.trusted-signers/1" || !Array.isArray(doc.signers)) {
+    fail(`${path} is not a sheaf.trusted-signers/1 document`);
+  }
+  return doc.signers as TrustedSigner[];
+}
+
 async function verifyBundle(flags: Flags): Promise<number> {
   if (flags.positionals.length !== 1) {
     fail("verify requires exactly one bundle path");
@@ -520,11 +549,13 @@ async function verifyBundle(flags: Flags): Promise<number> {
     ...(flags.offline
       ? {}
       : { base_rpc: flags.rpc ?? DEFAULT_RPC }),
+    ...(flags.signersPath ? { trusted_signers: loadTrustedSigners(flags.signersPath) } : {}),
   };
   const result = await verifyDisputeBundle(bundle, opts);
   process.stdout.write(formatDisputeVerification(result));
   if (!result.valid) return 1;
   if (flags.strict && !result.complete) return 1;
+  if (flags.requireVerifiedAuthorisation && result.authorisation !== "verified") return 1;
   if (flags.offline && !result.anchor_confirmed && !flags.allowUnconfirmedAnchor) {
     return 3;
   }
@@ -575,7 +606,16 @@ async function localExport(flags: Flags): Promise<number> {
     fail("local export requires --case <case.json> and --out <bundle.sheaf>");
   }
   const chainDir = resolve(flags.chainDir ?? "./.sheaf");
-  const prepared = await prepareLocalExport(chainDir, flags.casePath);
+  let prepared: Awaited<ReturnType<typeof prepareLocalExport>>;
+  try {
+    prepared = await prepareLocalExport(chainDir, flags.casePath);
+  } catch (err) {
+    if (err instanceof LocalSigningError) {
+      process.stderr.write(`EXPORT_REFUSED ${err.code} ${err.message}\n`);
+      return 1;
+    }
+    throw err;
+  }
   const localFlags: Flags = {
     ...flags,
     archive: prepared.archivePath,
@@ -630,6 +670,38 @@ async function localSync(flags: Flags): Promise<number> {
   }
 }
 
+/** Sign a mandate/delegation/consent document with a PRINCIPAL-held key.
+ *  Refuses the local ledger key and pinned recorder keys (S1). */
+async function localSignDocument(flags: Flags): Promise<number> {
+  if (flags.positionals.length !== 1 || !flags.keyPath || !flags.keyId) {
+    fail(
+      "sign-document requires <document.json> --key <principal.pem> --key-id <id>",
+    );
+  }
+  const documentPath = flags.positionals[0]!;
+  const chainDir = resolve(flags.chainDir ?? "./.sheaf");
+  const pinned = defaultTrustStore().recorder_keys.map((k) => k.public_key_base64);
+  try {
+    const signed = await signDocumentWithPrincipalKey({
+      documentPath,
+      keyPath: flags.keyPath!,
+      keyId: flags.keyId!,
+      outPath: flags.out ?? documentPath,
+      recorderKeys: recorderPublicKeys(chainDir, pinned),
+    });
+    process.stdout.write(
+      `SIGNED ${signed.outPath}\nkey_id: ${signed.keyId}\npublic_key_base64: ${signed.publicKeyBase64}\n`,
+    );
+    return 0;
+  } catch (err) {
+    if (err instanceof LocalSigningError) {
+      process.stderr.write(`SIGN_REFUSED ${err.code} ${err.message}\n`);
+      return 1;
+    }
+    throw err;
+  }
+}
+
 export async function runCli(argv: string[]): Promise<number> {
   if (argv.includes("--help") || argv.includes("-h")) {
     process.stdout.write(help() + "\n");
@@ -644,6 +716,7 @@ export async function runCli(argv: string[]): Promise<number> {
   if (argv[0] === "local") {
     if (command === "export") return localExport(flags);
     if (command === "sync") return localSync(flags);
+    if (command === "sign-document") return localSignDocument(flags);
     process.stderr.write(help() + "\n");
     return 2;
   }

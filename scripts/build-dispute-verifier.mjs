@@ -21,6 +21,9 @@ const template = readFileSync("scripts/dispute-verify.template.html", "utf8");
 if (!template.includes("/*__VERIFIER_JS__*/")) {
   throw new Error("template placeholder missing");
 }
-const html = template.replace("/*__VERIFIER_JS__*/", js);
+// Replacer FUNCTION, not a string: a string replacement expands `$&`, `` $` ``
+// and `$'` patterns that minified JS can contain, which splices template text
+// into the script (seen 2026-11-17). Same as inline-dispute-verifier.mjs.
+const html = template.replace("/*__VERIFIER_JS__*/", () => js);
 writeFileSync("dispute-verify.html", html);
 console.log(`wrote dispute-verify.html (${html.length} bytes)`);
