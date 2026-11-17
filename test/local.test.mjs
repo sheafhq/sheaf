@@ -14,6 +14,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { createServer } from "node:http";
+import { generateKeyPairSync } from "node:crypto";
 
 import { LocalLedger } from "../packages/mcp-recorder/dist/local.js";
 import { evaluatePolicy } from "../packages/mcp-recorder/dist/policy.js";
@@ -228,6 +229,32 @@ test("local mode: blocked call, allowed call, ledger, export, offline verify", a
     assert.ok(existsSync(join(chainDir, "local-keys.json")));
     if (process.platform !== "win32") {
       assert.equal(statSync(join(chainDir, "local-keys.json")).mode & 0o777, 0o600);
+    }
+
+    // S1 (2026-11-17): local export no longer signs case documents with the
+    // ledger (recorder) key. A complete bundle now requires the principal to
+    // sign with its own key; see test/local-signing.test.mjs for the
+    // unsigned and refusal cases.
+    const principalPem = join(dir, "principal.pem");
+    writeFileSync(
+      principalPem,
+      generateKeyPairSync("ed25519").privateKey.export({ format: "pem", type: "pkcs8" }),
+    );
+    for (const name of ["mandate", "delegation", "consent"]) {
+      const signed = await capture(() =>
+        runCli([
+          "local",
+          "sign-document",
+          join(dir, `${name}.json`),
+          "--key",
+          principalPem,
+          "--key-id",
+          "principal-test-1",
+          "--chain-dir",
+          chainDir,
+        ]),
+      );
+      assert.equal(signed.code, 0, signed.text);
     }
 
     const out = join(dir, "bundle.sheaf");

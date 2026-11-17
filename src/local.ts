@@ -1,9 +1,16 @@
 // Local-first export and sync primitives for `sheaf local`.
 //
 // The local recorder writes `.sheaf/ledger.jsonl`; this module verifies that
-// ledger, turns it into a local Merkle epoch, signs the case documents with the
-// same local Ed25519 key, and stages a local anchor request. It never contacts
-// the Sheaf Worker.
+// ledger, turns it into a local Merkle epoch, and stages a local anchor
+// request. It never contacts the Sheaf Worker.
+//
+// SECURITY (S1, see docs/SAP-ARCHITECTURE.md §13): the local ledger key is a
+// RECORDER key. It signs envelopes and anchor requests, and nothing else. It
+// must never sign mandate / delegation / consent documents: a recorder
+// signature is not a principal's authorisation. Case documents are passed
+// through with whatever principal signatures they already carry; principals
+// sign with their own key via `sheaf local sign-document`, which refuses the
+// ledger key and any pinned recorder key.
 
 import {
   chmodSync,
@@ -21,6 +28,7 @@ import {
 } from "node:crypto";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
+import { verifyEd25519 as verifyEd25519Strict } from "../packages/verify/dist/index.js";
 import { canonicalize } from "./canonical.js";
 import { encodeAnchorCalldata } from "./disclose.js";
 import { evidenceDocumentHash, stripDocumentSignature } from "./evidence.js";
@@ -291,29 +299,95 @@ export function writeLocalTrust(chainDir: string): string {
   return path;
 }
 
-async function signDocument(
-  document: Record<string, any>,
-  keys: LocalKeys,
-): Promise<Record<string, any>> {
-  const unsigned = stripDocumentSignature(document);
-  const digest = Buffer.from(await evidenceDocumentHash(unsigned), "hex");
-  const privateKey = createPrivateKey({
-    key: Buffer.from(keys.private_key_pkcs8_base64, "base64"),
-    format: "der",
-    type: "pkcs8",
-  });
-  const signature = sign(null, digest, privateKey).toString("base64");
-  return {
-    ...unsigned,
-    document_signature: {
-      alg: "Ed25519",
-      key_id: keys.key_id,
-      public_key_base64: keys.public_key_base64,
-      signature_base64: signature,
-    },
-  };
+/** A refusal from the S1 safeguards. `code` is stable and test-visible. */
+export class LocalSigningError extends Error {
+  constructor(
+    public readonly code:
+      | "RECORDER_SIGNED_NOT_PRINCIPAL"
+      | "SIGNING_KEY_IS_RECORDER_KEY"
+      | "DOCUMENT_SIGNATURE_INVALID"
+      | "INVALID_SIGNING_KEY",
+    message: string,
+  ) {
+    super(message);
+    this.name = "LocalSigningError";
+  }
 }
 
+type DocumentSignature = {
+  alg: string;
+  key_id: string;
+  public_key_base64: string;
+  signature_base64: string;
+};
+
+/** Verify an existing document_signature under its embedded key, with the
+ *  verifier's own strict Ed25519 implementation (rejects small-order keys,
+ *  non-canonical points, S >= L), so local export never passes on a signature
+ *  that the verifier would reject. */
+async function documentSignatureValid(
+  document: Record<string, any>,
+): Promise<boolean> {
+  const sig = document.document_signature as DocumentSignature | undefined;
+  if (!sig) return false;
+  if (sig.alg !== "Ed25519") return false;
+  try {
+    const digest = new Uint8Array(
+      Buffer.from(await evidenceDocumentHash(stripDocumentSignature(document)), "hex"),
+    );
+    return await verifyEd25519Strict(sig.public_key_base64, sig.signature_base64, digest);
+  } catch {
+    return false;
+  }
+}
+
+/** Raw-bytes identity (hex) of an Ed25519 public key. Every base64 spelling
+ *  of one key maps to the same value; never compare key strings or key_id. */
+export function keyFingerprint(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const raw = Buffer.from(value, "base64");
+  return raw.length === 32 ? raw.toString("hex") : null;
+}
+
+/** Fingerprints of every key that acts as a RECORDER in this context: the
+ *  local ledger key (if present) plus pinned recorder keys. */
+export function recorderPublicKeys(
+  chainDir: string | null,
+  pinned: string[],
+): Set<string> {
+  const keys = new Set<string>();
+  for (const k of pinned) {
+    const fp = keyFingerprint(k);
+    if (fp) keys.add(fp);
+  }
+  if (chainDir && existsSync(join(chainDir, "local-keys.json"))) {
+    const fp = keyFingerprint(loadLocalKeys(chainDir).public_key_base64);
+    if (fp) keys.add(fp);
+  }
+  return keys;
+}
+
+/** Strict base64: the string must be the canonical encoding of exactly
+ *  `length` bytes. Mirrors the verifier, so export refuses what the verifier
+ *  would reject. */
+function isCanonicalBase64(value: unknown, length: number): boolean {
+  if (typeof value !== "string" || !/^[A-Za-z0-9+/]*={0,2}$/.test(value)) return false;
+  const raw = Buffer.from(value, "base64");
+  return raw.length === length && raw.toString("base64") === value;
+}
+
+/**
+ * Copy the case documents into the chain directory WITHOUT signing them.
+ *
+ * - A document that already carries a valid signature by a non-recorder key
+ *   (a principal / payer / policy key) is copied byte-for-byte.
+ * - A document signed with the local recorder key is refused
+ *   (RECORDER_SIGNED_NOT_PRINCIPAL): it was produced by the pre-S1 code path.
+ * - A document whose signature does not verify (e.g. edited after signing) is
+ *   refused (DOCUMENT_SIGNATURE_INVALID); it is never silently stripped.
+ * - An unsigned document stays unsigned; the bundle then reports the missing
+ *   principal signature as an evidence gap.
+ */
 export async function prepareLocalCase(
   chainDir: string,
   casePath: string,
@@ -326,46 +400,81 @@ export async function prepareLocalCase(
 
   const resolveDoc = (path: string): string =>
     isAbsolute(path) ? path : resolve(base, path);
-  const signTo = async (
+  const copyTo = async (
     kind: string,
     path: string,
   ): Promise<Record<string, any>> => {
-    const signed = await signDocument(readJson(resolveDoc(path)), keys);
+    const document = readJson(resolveDoc(path));
+    const sig = document.document_signature as DocumentSignature | undefined;
+    if (sig) {
+      if (
+        typeof sig !== "object" ||
+        Array.isArray(sig) ||
+        !isCanonicalBase64(sig.public_key_base64, 32) ||
+        !isCanonicalBase64(sig.signature_base64, 64)
+      ) {
+        throw new LocalSigningError(
+          "DOCUMENT_SIGNATURE_INVALID",
+          `${kind} document ${path} has a malformed or non-canonically encoded document_signature.`,
+        );
+      }
+      if (keyFingerprint(sig.public_key_base64) === keyFingerprint(keys.public_key_base64)) {
+        throw new LocalSigningError(
+          "RECORDER_SIGNED_NOT_PRINCIPAL",
+          `${kind} document ${path} is signed with the local recorder key (${keys.key_id}). ` +
+            "A recorder signature is not the principal's authorisation. Remove document_signature, " +
+            "or have the principal sign it with `sheaf local sign-document`.",
+        );
+      }
+      if (!(await documentSignatureValid(document))) {
+        throw new LocalSigningError(
+          "DOCUMENT_SIGNATURE_INVALID",
+          `${kind} document ${path} has a document_signature that does not verify ` +
+            "(was the document edited after signing?). Re-sign it or remove the signature.",
+        );
+      }
+    }
     const out = join(docsDir, `${kind}.json`);
-    writeFileSync(out, JSON.stringify(signed, null, 2) + "\n", { mode: 0o600 });
+    writeFileSync(out, JSON.stringify(document, null, 2) + "\n", { mode: 0o600 });
     mode(out, 0o600);
-    return signed;
+    return document;
   };
 
-  let signedMandate: Record<string, any> | undefined;
+  let mandateDoc: Record<string, any> | undefined;
   if (manifest.evidence?.mandate?.document) {
-    signedMandate = await signTo("mandate", manifest.evidence.mandate.document);
+    mandateDoc = await copyTo("mandate", manifest.evidence.mandate.document);
     manifest.evidence.mandate.document = join(docsDir, "mandate.json");
   }
   if (manifest.evidence?.delegation?.chain) {
     for (let i = 0; i < manifest.evidence.delegation.chain.length; i++) {
       const link = manifest.evidence.delegation.chain[i];
       if (!link.document) continue;
-      await signTo(`delegation-${i}`, link.document);
+      await copyTo(`delegation-${i}`, link.document);
       link.document = join(docsDir, `delegation-${i}.json`);
     }
-    if (signedMandate) {
+    if (mandateDoc) {
+      // The root attestation reflects what actually exists: a principal (or
+      // policy) signature on the mandate if there is one, otherwise only the
+      // recorder's observation of the mandate event.
+      const sig = mandateDoc.document_signature as DocumentSignature | undefined;
+      const isPolicy = mandateDoc.principal?.type === "policy";
       manifest.evidence.delegation.root = {
-        type: "human",
-        id: signedMandate.principal?.id ?? "local-principal",
-        display_name: signedMandate.principal?.display_name ?? "Local principal",
-        attestation: {
-          basis: "principal_signature",
-          key_id: keys.key_id,
-          public_key_base64: keys.public_key_base64,
-          signature_base64:
-            signedMandate.document_signature?.signature_base64 ?? "",
-        },
+        type: isPolicy ? "policy" : "human",
+        id: mandateDoc.principal?.id ?? "local-principal",
+        display_name: mandateDoc.principal?.display_name ?? "Local principal",
+        attestation: sig
+          ? {
+              basis: isPolicy ? "policy_signature" : "principal_signature",
+              key_id: sig.key_id,
+              public_key_base64: sig.public_key_base64,
+              signature_base64: sig.signature_base64,
+            }
+          : { basis: "recorder_observed" },
       };
     }
   }
   if (manifest.evidence?.consent?.document) {
-    await signTo("consent", manifest.evidence.consent.document);
+    await copyTo("consent", manifest.evidence.consent.document);
     manifest.evidence.consent.document = join(docsDir, "consent.json");
   }
 
@@ -381,6 +490,64 @@ export async function prepareLocalCase(
   writeFileSync(out, JSON.stringify(manifest, null, 2) + "\n", { mode: 0o600 });
   mode(out, 0o600);
   return out;
+}
+
+/**
+ * Sign an evidence document with a PRINCIPAL-held Ed25519 key (PKCS#8 PEM).
+ *
+ * Refuses (SIGNING_KEY_IS_RECORDER_KEY) when the key is the local ledger key
+ * or any pinned recorder key: the recorder must never produce a principal's
+ * signature. Any existing document_signature is replaced.
+ */
+export async function signDocumentWithPrincipalKey(opts: {
+  documentPath: string;
+  keyPath: string;
+  keyId: string;
+  outPath: string;
+  recorderKeys: Set<string>;
+}): Promise<{ outPath: string; keyId: string; publicKeyBase64: string }> {
+  if (!opts.keyId) {
+    throw new LocalSigningError("INVALID_SIGNING_KEY", "--key-id is required");
+  }
+  let privateKey: ReturnType<typeof createPrivateKey>;
+  try {
+    privateKey = createPrivateKey(readFileSync(opts.keyPath, "utf8"));
+  } catch (err) {
+    throw new LocalSigningError(
+      "INVALID_SIGNING_KEY",
+      `cannot read ${opts.keyPath} as a PKCS#8 PEM private key: ${(err as Error).message}`,
+    );
+  }
+  if (privateKey.asymmetricKeyType !== "ed25519") {
+    throw new LocalSigningError(
+      "INVALID_SIGNING_KEY",
+      `${opts.keyPath} is a ${privateKey.asymmetricKeyType} key; Ed25519 is required`,
+    );
+  }
+  const spki = createPublicKey(privateKey).export({ format: "der", type: "spki" });
+  const publicKeyBase64 = Buffer.from(spki).subarray(-32).toString("base64");
+  if (opts.recorderKeys.has(keyFingerprint(publicKeyBase64) ?? "")) {
+    throw new LocalSigningError(
+      "SIGNING_KEY_IS_RECORDER_KEY",
+      "refusing to sign: this key is a recorder key (local ledger or pinned recorder). " +
+        "A principal's authorisation must be signed with a key the principal holds.",
+    );
+  }
+  const unsigned = stripDocumentSignature(readJson(opts.documentPath));
+  const digest = Buffer.from(await evidenceDocumentHash(unsigned), "hex");
+  const signature = sign(null, digest, privateKey).toString("base64");
+  const signed = {
+    ...unsigned,
+    document_signature: {
+      alg: "Ed25519",
+      key_id: opts.keyId,
+      public_key_base64: publicKeyBase64,
+      signature_base64: signature,
+    },
+  };
+  mkdirSync(dirname(resolve(opts.outPath)), { recursive: true });
+  writeFileSync(opts.outPath, JSON.stringify(signed, null, 2) + "\n");
+  return { outPath: opts.outPath, keyId: opts.keyId, publicKeyBase64 };
 }
 
 export async function prepareLocalExport(

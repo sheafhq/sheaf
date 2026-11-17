@@ -1,0 +1,46 @@
+// Generates the S1 legacy fixture using the PRE-FIX compiled code (2026-11-13
+// build): local export signs mandate/delegation/consent with the local
+// recorder (ledger) key and labels the root 'principal_signature'.
+import { mkdirSync, readFileSync, writeFileSync, rmSync, copyFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { LocalLedger } from './packages/mcp-recorder/dist/local.js';
+import { hashCanonical } from './packages/mcp-recorder/dist/canonical.js';
+import { runCli } from './dist-cli/cli.js';
+
+const dir = 'work'; rmSync(dir, { recursive: true, force: true }); mkdirSync(dir, { recursive: true });
+for (const name of ['mandate', 'delegation', 'consent']) {
+  const doc = JSON.parse(readFileSync('test/fixtures/evidence/' + name + '.json', 'utf8'));
+  if (doc.scope) { doc.scope.valid_until = '2027-11-11T16:30:00Z'; doc.expires_at = '2027-11-11T16:30:00Z'; }
+  writeFileSync(join(dir, name + '.json'), JSON.stringify(doc, null, 2));
+}
+const policy = JSON.parse(readFileSync('test/fixtures/dispute-walking/policy.json', 'utf8'));
+const policyHash = 'sha256:' + hashCanonical(policy);
+const args = { merchant: 'northwind-outfitters.example', amount_minor: 12900, currency: 'USD', order_id: 'order_demo_001', mandate_id: 'mnd_demo_001', consent_id: 'consent_demo_001' };
+const casePath = join(dir, 'case.json');
+writeFileSync(casePath, JSON.stringify({
+  case: { case_id: 'CB-S1-LEGACY', card_network: 'visa', reason_code: { schema: '2026 Visa Claims Resolution guide', value: '10.4', label: 'Other fraud' },
+    transaction: { reference: 'txn_s1_legacy', amount_minor: 12900, currency: 'USD', occurred_at: '2026-11-17T12:00:00Z' },
+    merchant: { id: 'merchant_local', name: 'Northwind Outfitters', url: 'https://northwind-outfitters.example' },
+    response_due_at: '2026-11-24T23:59:59Z',
+    dispute_basis: { category: 'friendly_fraud', asserted_by: 'merchant', merchant_position: 'S1 legacy fixture.' },
+    created_at: '2099-01-01T00:00:00Z' },
+  subject: { from_seq: 4, to_seq: 4, disputed_event_seqs: [4], claims: {
+    agent_id: { value: 'agent://shopper-7', derived_from: 'event.actor', ref: 'seq:4' },
+    tool: { value: 'mcp://shop/payment', derived_from: 'event.tool', ref: 'seq:4' },
+    merchant: { value: args.merchant, derived_from: 'payload', ref: 'pl_4_args', path: '$.merchant' },
+    amount_minor: { value: 12900, derived_from: 'payload', ref: 'pl_4_args', path: '$.amount_minor' },
+    currency: { value: 'USD', derived_from: 'payload', ref: 'pl_4_args', path: '$.currency' } } },
+  evidence: { mandate: { seq: 1, document: 'mandate.json' }, delegation: { chain: [{ seq: 2, parent_seq: 1, document: 'delegation.json' }] }, consent: { seq: 3, document: 'consent.json' } },
+  payloads: [ { seq: 4, kind: 'tool_arguments', path: '.sheaf/payloads/000004-arguments.json' }, { seq: 4, kind: 'tool_result', path: '.sheaf/payloads/000004-result.json' } ],
+}, null, 2));
+const chainDir = join(dir, '.sheaf');
+const ledger = new LocalLedger({ recorderUrls: [], chainId: 's1-legacy', actor: 'local-user', captureMethods: new Set(), logDebug: false, policy, policyHash, local: { chainDir, casePath, actor: 'local-user' } });
+ledger.submit({ id: 1, method: 'tools/call', params: { name: 'mcp://shop/payment', arguments: args }, startedAt: Date.now(), policy: { schema: 'sheaf.policy/1', hash: policyHash, verdict: 'ALLOW', reason_code: 'allowed' } }, { result: { status: 'authorized' } });
+await ledger.drain();
+const code = await runCli(['local', 'export', '--chain-dir', chainDir, '--case', casePath, '--out', 'legacy-recorder-signed.sheaf']);
+if (code !== 0) throw new Error('legacy export failed: ' + code);
+copyFileSync(join(chainDir, 'trust.json'), 'legacy-recorder-signed.trust.json');
+const b = JSON.parse(readFileSync('legacy-recorder-signed.sheaf', 'utf8'));
+const ledgerKey = JSON.parse(readFileSync(join(chainDir, 'local-keys.json'), 'utf8')).public_key_base64;
+console.log('mandate signed by ledger key:', b.evidence.mandate.document.document_signature?.public_key_base64 === ledgerKey);
+console.log('root basis:', b.evidence.delegation.root.attestation.basis, '| root key == ledger key:', b.evidence.delegation.root.attestation.public_key_base64 === ledgerKey);

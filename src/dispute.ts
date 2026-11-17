@@ -323,11 +323,65 @@ function sameRef(a: EventRef | null, b: { chain_id: string; seq: number } | null
   return a.chain_id === b.chain_id && a.seq === b.seq;
 }
 
+/** Raw-bytes identity of an Ed25519 key (hex). Decodes leniently so that every
+ *  base64 spelling of one key compares equal. Never compare key strings or
+ *  key_id values (S1 review: re-spelled keys evaded string comparison). */
+function keyFingerprint(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  let bin: string;
+  try {
+    bin = atob(value);
+  } catch {
+    return null;
+  }
+  if (bin.length !== 32) return null;
+  let hex = "";
+  for (let i = 0; i < bin.length; i++) {
+    hex += bin.charCodeAt(i).toString(16).padStart(2, "0");
+  }
+  return hex;
+}
+
+/** True if the document is signed with the recorder's own key. Such a
+ *  signature is a recorder attestation, never a principal/payer authorisation. */
+function signedByRecorderKey(
+  doc: EvidenceDocument,
+  recorderPublicKey: string | undefined,
+): boolean {
+  const recorder = keyFingerprint(recorderPublicKey);
+  return (
+    recorder !== null &&
+    keyFingerprint(doc.document_signature?.public_key_base64) === recorder
+  );
+}
+
+/** Refuse an explicit authorisation claim that rests on a recorder-key
+ *  signature (S1: the recorder must never stand in for the principal). */
+function assertNotRecorderAuthorisation(
+  doc: EvidenceDocument,
+  basis: string | undefined,
+  recorderPublicKey: string | undefined,
+  label: string,
+): void {
+  if (
+    basis !== undefined &&
+    basis !== "recorder_observed" &&
+    signedByRecorderKey(doc, recorderPublicKey)
+  ) {
+    throw new DisputeBuildError(
+      "RECORDER_SIGNED_NOT_PRINCIPAL",
+      `${label} claims authorization_basis "${basis}" but is signed with the recorder key; a recorder signature is not a principal authorisation`,
+    );
+  }
+}
+
 function defaultAuthorizationBasis(
   doc: EvidenceDocument,
   eventKind: "mandate" | "delegation" | "consent",
+  recorderPublicKey?: string,
 ): string {
   if (!doc.document_signature) return "recorder_observed";
+  if (signedByRecorderKey(doc, recorderPublicKey)) return "recorder_observed";
   if (eventKind === "consent") {
     return doc.schema === "sheaf.consent-document/1" &&
       doc.method === "merchant_signature"
@@ -421,6 +475,13 @@ async function buildEvidenceSection<T extends EvidenceDocument>(
     );
   }
 
+  const recorderKey = disclosures.recorder?.public_key_base64;
+  assertNotRecorderAuthorisation(
+    input.document,
+    input.authorization_basis,
+    recorderKey,
+    kind,
+  );
   return {
     status: "included",
     event_ref: input.event_ref,
@@ -429,7 +490,7 @@ async function buildEvidenceSection<T extends EvidenceDocument>(
     document_signature: input.document.document_signature ?? null,
     authorization_basis:
       input.authorization_basis ??
-      defaultAuthorizationBasis(input.document, kind),
+      defaultAuthorizationBasis(input.document, kind, recorderKey),
   };
 }
 
@@ -666,6 +727,13 @@ export async function buildDisputeBundle(
           `delegation ${refKey(link.event_ref)} document hash does not match inputs_hash`,
         );
       }
+      const recorderKey = disclosures.recorder?.public_key_base64;
+      assertNotRecorderAuthorisation(
+        link.document,
+        link.authorization_basis,
+        recorderKey,
+        `delegation ${refKey(link.event_ref)}`,
+      );
       chain.push({
         event_ref: link.event_ref,
         parent_event_ref: link.parent_event_ref,
@@ -674,8 +742,22 @@ export async function buildDisputeBundle(
         document_signature: link.document.document_signature ?? null,
         authorization_basis:
           link.authorization_basis ??
-          defaultAuthorizationBasis(link.document, "delegation"),
+          defaultAuthorizationBasis(link.document, "delegation", recorderKey),
       });
+    }
+
+    const explicitRoot = evidence.delegation.root;
+    const recorderFp = keyFingerprint(disclosures.recorder?.public_key_base64);
+    if (
+      explicitRoot &&
+      explicitRoot.attestation?.basis !== "recorder_observed" &&
+      recorderFp !== null &&
+      keyFingerprint(explicitRoot.attestation?.public_key_base64) === recorderFp
+    ) {
+      throw new DisputeBuildError(
+        "RECORDER_SIGNED_NOT_PRINCIPAL",
+        `delegation root claims "${explicitRoot.attestation.basis}" with the recorder key; use basis "recorder_observed" or a principal-held key`,
+      );
     }
 
     const first = chain[0]!;

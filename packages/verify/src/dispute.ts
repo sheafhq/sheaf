@@ -10,9 +10,16 @@
 
 import { canonicalize, hashCanonical } from "./canonical.js";
 import { computeRootFromProof } from "./merkle.js";
-import { verifyEd25519 } from "./signature.js";
+import {
+  decodeCanonicalBase64,
+  decodeEd25519Point,
+  isSmallOrderEd25519,
+  keyFingerprint,
+  verifyEd25519,
+} from "./signature.js";
 import { verifyDisclosures } from "./disclosures.js";
 import { verifyEvidenceDocument } from "./evidence.js";
+import { defaultTrustStore } from "./trust.js";
 import {
   evaluatePolicy,
   validatePolicy,
@@ -55,8 +62,67 @@ export type DisputeCheck = {
   reason?: string;
 };
 
+/** A non-fatal finding that weakens what the bundle proves. Integrity can
+ *  still be valid; the authorisation claim is downgraded. */
+export type DisputeWarning = {
+  code:
+    | "RECORDER_SIGNED_NOT_PRINCIPAL"
+    | "ROOT_ATTESTATION_UNVERIFIED"
+    | "TRUSTED_SIGNER_INVALID"
+    | "TRUSTED_SIGNER_IS_RECORDER";
+  section: string;
+  reason: string;
+};
+
+/**
+ * Terminology (S1 review). Kept deliberately distinct:
+ *
+ *  - cryptographically_valid: the signature verifies under the strict Ed25519
+ *    profile over the document hash. Says nothing about who signed.
+ *  - key_class "recognised_recorder": the key is a recorder key in scope. A
+ *    recorder records; its signature never counts as authorisation.
+ *  - key_class "unrecognised": any other key. It is self-asserted, embedded
+ *    in the document. Anyone, including a recorder with a second key, can
+ *    produce one.
+ *  - key_class "trusted_signer": the key is pinned BY THE RELYING PARTY
+ *    (options.trusted_signers) to a party id, for a role and time window.
+ *  - principal_authenticated: trusted_signer AND the pinned party equals the
+ *    party the document names (mandate principal / delegation issuer /
+ *    consent payer or merchant) AND the event time is in the pinned window.
+ *    Relative to the relying party's own pins; this is NOT SAP.
+ *  - authorisation "verified": every authorising document is
+ *    principal_authenticated and the delegation root is backed by one of
+ *    those signatures. Only then.
+ */
+export type SignatureKeyClass = "recognised_recorder" | "unrecognised" | "trusted_signer";
+
+export type SignatureAssessment = {
+  section: string;
+  /** null when the document carries no signature. */
+  key_class: SignatureKeyClass | null;
+  cryptographically_valid: boolean;
+  /** Lowercase hex of the raw 32-byte public key. */
+  key_fingerprint: string | null;
+  /** The party the document names as its authoriser. */
+  expected_party: string | null;
+  principal_authenticated: boolean;
+};
+
+export type AuthorisationTier =
+  | "verified"
+  | "unauthenticated"
+  | "recorder_attested"
+  | "absent"
+  | "not_evaluated";
+
 export type DisputeVerification = {
   valid: boolean;
+  /**
+   * Evidence completeness: every evidence section present and signed by a
+   * NON-RECORDER key, plus payloads and claims. Unchanged for historical
+   * bundles. It does not mean authorised by an authenticated principal; see
+   * `authorisation`.
+   */
   complete: boolean;
   anchor_confirmed: boolean;
   anchor_mode?: "base" | "local";
@@ -65,7 +131,105 @@ export type DisputeVerification = {
   reason?: string;
   checks: DisputeCheck[];
   evidence_gaps: string[];
+  /** Present only when non-empty. */
+  warnings?: DisputeWarning[];
+  /** The authorisation tier. Never "verified" via unrecognised keys. */
+  authorisation: AuthorisationTier;
+  /** One entry per evidence document, in section order. */
+  signatures: SignatureAssessment[];
 };
+
+/** A relying-party pin: "this key speaks for this party, in these roles,
+ *  during this window". The relying party's assertion, like pinned recorder
+ *  keys. */
+export type TrustedSigner = {
+  key_id?: string;
+  public_key_base64: string;
+  party_id: string;
+  roles: Array<"mandate" | "delegation" | "consent">;
+  active_from: string;
+  active_until: string | null;
+};
+
+// ---- S1: signature classification --------------------------------------------
+// All key comparisons use keyFingerprint() (raw key bytes), never key strings
+// and never key_id. key_id is a free-text label and is ignored for
+// classification.
+
+/** Fingerprints of every key acting as a RECORDER for this bundle: the
+ *  bundle's own recorder key plus every pinned or supplied recorder key. A
+ *  document signed by one of these was signed by the recorder, never by a
+ *  principal. */
+function recorderKeySet(bundle: AnyBundle, trust: TrustStore | undefined): Set<string> {
+  const keys = new Set<string>();
+  const own = keyFingerprint(bundle?.recorder?.public_key_base64);
+  if (own) keys.add(own);
+  for (const k of (trust ?? defaultTrustStore()).recorder_keys) {
+    const fp = keyFingerprint(k.public_key_base64);
+    if (fp) keys.add(fp);
+  }
+  return keys;
+}
+
+function signatureObject(document: any): Record<string, unknown> | null {
+  const sig = document?.document_signature;
+  return sig && typeof sig === "object" && !Array.isArray(sig) ? sig : null;
+}
+
+function recorderSigned(document: any, recorderKeys: Set<string>): boolean {
+  const fp = keyFingerprint(signatureObject(document)?.public_key_base64);
+  return fp !== null && recorderKeys.has(fp);
+}
+
+/** Signed by a key that is NOT a recorder key. Call only on documents that
+ *  passed verifyEvidenceDocument (signature valid, canonical encoding). This
+ *  is a classification of the KEY, not an authentication of the signer. */
+function signedByNonRecorderKey(document: any, recorderKeys: Set<string>): boolean {
+  const fp = keyFingerprint(signatureObject(document)?.public_key_base64);
+  return fp !== null && !recorderKeys.has(fp);
+}
+
+type RootStatus = "verified" | "observed" | "recorder" | "unverified";
+
+/**
+ * The delegation root's attestation is a claim inside the bundle, not a
+ * signature anyone verified. It counts only when it is backed by a principal
+ * signature that DID verify:
+ * - no key material: the first delegation link must be principal-signed;
+ * - key material: the same key (by fingerprint) AND the identical signature
+ *   as the mandate's or the first link's verified principal signature.
+ * Anything else is "unverified"; a recorder key is "recorder".
+ */
+function rootAttestationStatus(
+  delegation: any,
+  mandateDocument: any,
+  recorderKeys: Set<string>,
+): RootStatus {
+  const att = delegation?.root?.attestation;
+  if (!att || typeof att !== "object") return "unverified";
+  if (att.basis === "recorder_observed") return "observed";
+  const first = delegation?.chain?.[0]?.document;
+  const hasKeyMaterial =
+    att.public_key_base64 !== undefined || att.signature_base64 !== undefined;
+  if (!hasKeyMaterial) {
+    if (recorderSigned(first, recorderKeys)) return "recorder";
+    return signedByNonRecorderKey(first, recorderKeys) ? "verified" : "unverified";
+  }
+  const fp = keyFingerprint(att.public_key_base64);
+  if (fp !== null && recorderKeys.has(fp)) return "recorder";
+  const backs = (doc: any): boolean => {
+    const sig = signatureObject(doc);
+    return (
+      fp !== null &&
+      !!sig &&
+      signedByNonRecorderKey(doc, recorderKeys) &&
+      keyFingerprint(sig.public_key_base64) === fp &&
+      typeof att.signature_base64 === "string" &&
+      att.signature_base64 === sig.signature_base64
+    );
+  };
+  return backs(mandateDocument) || backs(first) ? "verified" : "unverified";
+}
 
 export type VerifyDisputeOptions = {
   /** Pinned trust. Defaults to the verifier's shipped trust store. */
@@ -73,7 +237,64 @@ export type VerifyDisputeOptions = {
   /** If omitted, integrity-only: anchor_on_base is null. */
   base_rpc?: string;
   expected_network?: string;
+  /** Relying-party signer pins. Without them no signature is
+   *  principal-authenticated, and authorisation can't be "verified". */
+  trusted_signers?: TrustedSigner[];
 };
+
+const ROLES = ["mandate", "delegation", "consent"] as const;
+
+/** Validate pins; invalid ones never authenticate anything (fail closed). */
+function usableTrustedSigners(
+  signers: TrustedSigner[] | undefined,
+  recorderKeys: Set<string>,
+  warn: (w: DisputeWarning) => void,
+): Array<TrustedSigner & { fingerprint: string }> {
+  const out: Array<TrustedSigner & { fingerprint: string }> = [];
+  (signers ?? []).forEach((s, i) => {
+    const label = `trusted_signers[${i}]`;
+    const raw = decodeCanonicalBase64(s?.public_key_base64, 32);
+    const point = raw ? decodeEd25519Point(raw) : null;
+    const ok =
+      !!point &&
+      !isSmallOrderEd25519(point) &&
+      typeof s.party_id === "string" &&
+      s.party_id.length > 0 &&
+      Array.isArray(s.roles) &&
+      s.roles.length > 0 &&
+      s.roles.every((r) => (ROLES as readonly string[]).includes(r)) &&
+      Number.isFinite(Date.parse(s.active_from)) &&
+      (s.active_until === null || Number.isFinite(Date.parse(s.active_until)));
+    if (!ok) {
+      warn({
+        code: "TRUSTED_SIGNER_INVALID",
+        section: label,
+        reason: "trusted signer entry is malformed or uses a weak/non-canonical key; ignored",
+      });
+      return;
+    }
+    const fingerprint = keyFingerprint(s.public_key_base64)!;
+    if (recorderKeys.has(fingerprint)) {
+      warn({
+        code: "TRUSTED_SIGNER_IS_RECORDER",
+        section: label,
+        reason: "a recorder key can never be a trusted principal signer; ignored",
+      });
+      return;
+    }
+    out.push({ ...s, fingerprint });
+  });
+  return out;
+}
+
+/** The party a document names as its authoriser. */
+function expectedParty(kind: (typeof ROLES)[number], document: any): string | null {
+  if (kind === "mandate") return document?.principal?.id ?? null;
+  if (kind === "delegation") return document?.issuer?.id ?? null;
+  return document?.method === "merchant_signature"
+    ? (document?.merchant ?? null)
+    : (document?.payer?.id ?? null);
+}
 
 type AnyBundle = Record<string, any>;
 type Ref = { chain_id: string; seq: number };
@@ -398,11 +619,12 @@ function gapsFromEvidence(
   mandate: ReturnType<typeof evidenceSection>,
   delegation: any,
   consent: ReturnType<typeof evidenceSection>,
+  recorderKeys: Set<string>,
 ): Set<string> {
   const gaps = new Set<string>();
   if (mandate.status !== "included") {
     gaps.add("mandate");
-  } else if (!mandate.document?.document_signature) {
+  } else if (!signedByNonRecorderKey(mandate.document, recorderKeys)) {
     gaps.add("mandate_signature");
   }
 
@@ -413,12 +635,11 @@ function gapsFromEvidence(
       gaps.add("delegation");
     } else {
       for (const link of delegation.chain) {
-        if (!link.document?.document_signature) gaps.add("delegation_signature");
+        if (!signedByNonRecorderKey(link.document, recorderKeys)) gaps.add("delegation_signature");
       }
-      if (
-        !delegation.root ||
-        delegation.root.attestation?.basis === "recorder_observed"
-      ) {
+      const mandateDocument =
+        mandate.status === "included" ? mandate.document : null;
+      if (rootAttestationStatus(delegation, mandateDocument, recorderKeys) !== "verified") {
         gaps.add("delegation_root");
       }
     }
@@ -426,7 +647,7 @@ function gapsFromEvidence(
 
   if (consent.status !== "included") {
     gaps.add("consent");
-  } else if (!consent.document?.document_signature) {
+  } else if (!signedByNonRecorderKey(consent.document, recorderKeys)) {
     gaps.add("consent_signature");
   }
 
@@ -472,6 +693,70 @@ export async function verifyDisputeBundle(
 ): Promise<DisputeVerification> {
   const checks = freshChecks();
   const gaps = new Set<string>();
+  const warnings: DisputeWarning[] = [];
+  const recorderKeys = recorderKeySet(bundle, opts.trust);
+  const warnRecorderSigned = (section: string): void => {
+    warnings.push({
+      code: "RECORDER_SIGNED_NOT_PRINCIPAL",
+      section,
+      reason:
+        `${section} is signed with a recorder key; counted as unsigned. ` +
+        "A recorder signature is not a principal's authorisation.",
+    });
+  };
+  const signers = usableTrustedSigners(opts.trusted_signers, recorderKeys, (w) =>
+    warnings.push(w),
+  );
+  const assessments: SignatureAssessment[] = [];
+  /** Classify one evidence document that already passed verifyEvidenceDocument
+   *  (so a present signature is cryptographically valid, strict profile). */
+  const assess = (
+    section: string,
+    kind: (typeof ROLES)[number],
+    document: any,
+    disclosure: DisclosureEvent | null | undefined,
+  ): void => {
+    const sig = signatureObject(document);
+    const fp = keyFingerprint(sig?.public_key_base64);
+    const party = expectedParty(kind, document);
+    if (!sig || !fp) {
+      assessments.push({
+        section,
+        key_class: null,
+        cryptographically_valid: false,
+        key_fingerprint: null,
+        expected_party: party,
+        principal_authenticated: false,
+      });
+      return;
+    }
+    const at = Date.parse(disclosure?.envelope?.event?.ts ?? "");
+    const pins = signers.filter((s) => s.fingerprint === fp);
+    const keyClass: SignatureKeyClass = recorderKeys.has(fp)
+      ? "recognised_recorder"
+      : pins.length
+        ? "trusted_signer"
+        : "unrecognised";
+    const authenticated =
+      keyClass === "trusted_signer" &&
+      party !== null &&
+      Number.isFinite(at) &&
+      pins.some(
+        (s) =>
+          s.roles.includes(kind) &&
+          s.party_id === party &&
+          at >= Date.parse(s.active_from) &&
+          (s.active_until === null || at < Date.parse(s.active_until)),
+      );
+    assessments.push({
+      section,
+      key_class: keyClass,
+      cryptographically_valid: true,
+      key_fingerprint: fp,
+      expected_party: party,
+      principal_authenticated: authenticated,
+    });
+  };
   let anchorConfirmed = false;
   let anchorMode: "base" | "local" = "base";
   let topCode: string | undefined;
@@ -482,6 +767,20 @@ export async function verifyDisputeBundle(
       checks.slice(0, 12).every((c) => c.ok !== false) &&
       checks[13]!.ok !== false;
     const complete = checks[12]!.ok === true;
+    const authorisation: AuthorisationTier = (() => {
+      if (!valid) return "not_evaluated";
+      if (assessments.some((a) => a.key_class === "recognised_recorder")) {
+        return "recorder_attested";
+      }
+      const sectionMissing = ["mandate", "delegation", "consent"].some((g) => gaps.has(g));
+      if (sectionMissing || assessments.length === 0 || assessments.some((a) => a.key_class === null)) {
+        return "absent";
+      }
+      if (assessments.every((a) => a.principal_authenticated) && !gaps.has("delegation_root")) {
+        return "verified";
+      }
+      return "unauthenticated";
+    })();
     return {
       valid,
       complete,
@@ -494,6 +793,9 @@ export async function verifyDisputeBundle(
       ...(topReason ? { reason: topReason } : {}),
       checks,
       evidence_gaps: [...gaps].sort(),
+      ...(warnings.length ? { warnings: [...warnings] } : {}),
+      authorisation,
+      signatures: assessments.map((a) => ({ ...a })),
     };
   };
 
@@ -788,7 +1090,13 @@ export async function verifyDisputeBundle(
       );
     }
     check(checks, 8, true);
-    if (!mandateSection.document.document_signature) gaps.add("mandate_signature");
+    if (recorderSigned(mandateSection.document, recorderKeys)) {
+      warnRecorderSigned("mandate");
+    }
+    assess("mandate", "mandate", mandateSection.document, mandateSection.disclosure);
+    if (!signedByNonRecorderKey(mandateSection.document, recorderKeys)) {
+      gaps.add("mandate_signature");
+    }
   }
 
   // 9: delegation
@@ -851,15 +1159,32 @@ export async function verifyDisputeBundle(
         if (!docCheck.ok) {
           return fail(9, docCheck.code ?? "EVIDENCE_DOC_HASH_MISMATCH", docCheck.reason ?? "delegation document invalid");
         }
-        if (!link.document.document_signature) gaps.add("delegation_signature");
+        if (recorderSigned(link.document, recorderKeys)) {
+          warnRecorderSigned(`delegation ${eventRefString(link.event_ref)}`);
+        }
+        assess(`delegation ${eventRefString(link.event_ref)}`, "delegation", link.document, disclosure);
+        if (!signedByNonRecorderKey(link.document, recorderKeys)) {
+          gaps.add("delegation_signature");
+        }
       }
-      if (
-        !bundle.evidence.delegation.root ||
-        bundle.evidence.delegation.root.attestation?.basis ===
-          "recorder_observed"
-      ) {
-        gaps.add("delegation_root");
+      const rootStatus = rootAttestationStatus(
+        bundle.evidence.delegation,
+        mandateSection.status === "included" ? mandateSection.document : null,
+        recorderKeys,
+      );
+      const claimed = String(bundle.evidence.delegation.root?.attestation?.basis ?? "none");
+      if (rootStatus === "recorder") {
+        warnRecorderSigned(`delegation root (claimed ${claimed})`);
+      } else if (rootStatus === "unverified") {
+        warnings.push({
+          code: "ROOT_ATTESTATION_UNVERIFIED",
+          section: `delegation root (claimed ${claimed})`,
+          reason:
+            "the root attestation is not backed by a verified principal signature in this bundle " +
+            "(no matching mandate or first-delegation signature); counted as absent.",
+        });
       }
+      if (rootStatus !== "verified") gaps.add("delegation_root");
       check(checks, 9, true);
     }
   }
@@ -906,7 +1231,9 @@ export async function verifyDisputeBundle(
     ) {
       return fail(10, "CONSENT_ARTIFACT_MISMATCH", "consent artifact hash does not match document");
     }
-    if (!doc.document_signature) gaps.add("consent_signature");
+    if (recorderSigned(doc, recorderKeys)) warnRecorderSigned("consent");
+    assess("consent", "consent", doc, consentSection.disclosure);
+    if (!signedByNonRecorderKey(doc, recorderKeys)) gaps.add("consent_signature");
     check(checks, 10, true);
   }
 
@@ -959,6 +1286,7 @@ export async function verifyDisputeBundle(
     mandateSection,
     bundle.evidence.delegation,
     consentSection,
+    recorderKeys,
   );
   for (const gap of finalGaps) gaps.add(gap);
   const complete = gaps.size === 0;
@@ -1063,7 +1391,20 @@ export function formatDisputeVerification(
         ? "VALID (complete)"
         : "VALID (partial)";
 
+  // Line 2, always: what the verdict does NOT say. Never "verified" via an
+  // unrecognised key.
+  const AUTHORISATION_TEXT: Record<AuthorisationTier, string> = {
+    verified:
+      "verified — every authorising document is signed by a relying-party-pinned signer for the party it names (a relying-party pin, not SAP identity)",
+    unauthenticated:
+      "unauthenticated — signatures are cryptographically valid but made with unrecognised keys; no signer is authenticated as the named principal",
+    recorder_attested:
+      "recorder-attested only — a recorder key signed evidence documents; there is no principal signature",
+    absent: "absent — at least one authorising document is missing or unsigned",
+    not_evaluated: "not evaluated — the bundle is not valid",
+  };
   const lines: string[] = [verdict];
+  lines.push(`authorisation: ${AUTHORISATION_TEXT[result.authorisation ?? "not_evaluated"]}`);
   if (result.bundle_id) lines.push(`bundle_id: ${result.bundle_id}`);
   if (result.code) lines.push(`code: ${result.code}`);
   if (result.reason) lines.push(`reason: ${result.reason}`);
@@ -1079,5 +1420,17 @@ export function formatDisputeVerification(
   );
   lines.push(`anchor_confirmed: ${result.anchor_confirmed}`);
   lines.push(`anchor_mode: ${result.anchor_mode ?? "base"}`);
+  for (const s of result.signatures ?? []) {
+    const key =
+      s.key_class === null
+        ? "unsigned"
+        : `${s.cryptographically_valid ? "valid" : "INVALID"} signature, key ${s.key_class.replace(/_/g, " ")} (${s.key_fingerprint?.slice(0, 16)}…)`;
+    lines.push(
+      `signature [${s.section}]: ${key}; names party ${s.expected_party ?? "?"}; principal ${s.principal_authenticated ? "AUTHENTICATED (relying-party pin)" : "not authenticated"}`,
+    );
+  }
+  for (const w of result.warnings ?? []) {
+    lines.push(`warning: ${w.code} [${w.section}] ${w.reason}`);
+  }
   return lines.join("\n") + "\n";
 }

@@ -12,7 +12,12 @@
 // authorization_basis separately.
 
 import { canonicalize, sha256Hex } from "./canonical.js";
-import { verifyEd25519 } from "./signature.js";
+import {
+  decodeCanonicalBase64,
+  isCanonicalEd25519Point,
+  strictEd25519Reason,
+  verifyEd25519,
+} from "./signature.js";
 import type { Envelope } from "./types.js";
 
 export const EVIDENCE_SCHEMAS = {
@@ -186,6 +191,34 @@ export async function verifyEvidenceDocument(
     return invalid(
       "EVIDENCE_DOC_SIGNATURE_INVALID",
       "document_signature is malformed",
+    );
+  }
+
+  // Fail closed on non-canonical encodings: one key must have exactly one
+  // accepted spelling, so that key classification (recorder vs principal)
+  // cannot be evaded by re-spelling a key (S1 review).
+  const rawKey = decodeCanonicalBase64(signature.public_key_base64, 32);
+  if (!rawKey || !isCanonicalEd25519Point(rawKey)) {
+    return invalid(
+      "EVIDENCE_DOC_SIGNATURE_INVALID",
+      "document_signature.public_key_base64 is not a canonical base64 Ed25519 public key",
+    );
+  }
+  const rawSig = decodeCanonicalBase64(signature.signature_base64, 64);
+  if (!rawSig) {
+    return invalid(
+      "EVIDENCE_DOC_SIGNATURE_INVALID",
+      "document_signature.signature_base64 is not a canonical base64 64-byte signature",
+    );
+  }
+  // Strict Ed25519 profile: rejects small-order keys (which verify a keyless
+  // "universal" signature in native WebCrypto), small-order or non-canonical
+  // R, and S >= L.
+  const strict = strictEd25519Reason(rawKey, rawSig);
+  if (strict) {
+    return invalid(
+      "EVIDENCE_DOC_SIGNATURE_INVALID",
+      `document_signature fails strict Ed25519 verification (${strict})`,
     );
   }
 

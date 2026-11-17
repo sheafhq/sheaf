@@ -314,10 +314,34 @@ sheaf local export \
 ```
 
 Local export verifies the ledger chain and signatures, builds a local Merkle
-epoch, signs the case documents with the local key, writes `.sheaf/trust.json`,
-and assembles the same `sheaf.dispute-bundle/1` shape as the cloud path. The
-bundle carries `anchor.mode: "local"`; `anchor_on_base` is `–` because there is
-no Base transaction. Verify it offline with the local trust file:
+epoch, writes `.sheaf/trust.json`, and assembles the same
+`sheaf.dispute-bundle/1` shape as the cloud path. The bundle carries
+`anchor.mode: "local"`; `anchor_on_base` is `–` because there is no Base
+transaction.
+
+**Local export never signs the mandate, delegation or consent.** The ledger
+key is a *recorder* key: it signs envelopes and anchor requests only. A
+recorder signature is not the principal's authorisation (security fix S1,
+2026-11-17; see `docs/SAP-ARCHITECTURE.md` §13). Documents are copied with the
+signatures they already carry. Export refuses a document signed with the
+ledger key (`RECORDER_SIGNED_NOT_PRINCIPAL`) or with a signature that no longer
+verifies (`DOCUMENT_SIGNATURE_INVALID`).
+
+To make the evidence complete, the **principal** signs each document with
+**their own** Ed25519 key (PKCS#8 PEM), before or after the events are
+recorded. The signature is excluded from the document hash, so the recorded
+event still matches:
+
+```bash
+sheaf local sign-document ./mandate.json    --key ./principal.pem --key-id payer-key-1
+sheaf local sign-document ./delegation.json --key ./principal.pem --key-id payer-key-1
+sheaf local sign-document ./consent.json    --key ./principal.pem --key-id payer-key-1
+```
+
+`sign-document` refuses the ledger key and any pinned recorder key
+(`SIGNING_KEY_IS_RECORDER_KEY`). Keep the principal key off the agent host.
+
+Verify offline with the local trust file:
 
 ```bash
 sheaf dispute verify ./bundle.sheaf \
@@ -325,8 +349,39 @@ sheaf dispute verify ./bundle.sheaf \
   --trust ./.sheaf/trust.json
 ```
 
-Expected: `VALID (complete)`, `[14] policy_enforced ✓`, `anchor_confirmed: true`,
-and `anchor_mode: local`.
+Expected with principal-signed documents: `VALID (complete)` and, on line 2,
+`authorisation: unauthenticated — ...`, plus `[14] policy_enforced ✓`,
+`anchor_confirmed: true` and `anchor_mode: local`.
+
+Line 2 is deliberate. `VALID (complete)` means every evidence document carries
+a valid signature by a key that is **not** a recorder key. It does **not** mean
+the signer was authenticated: the key sits inside the document, and any
+freshly generated key would verify the same way.
+
+A relying party that knows the principal's key can pin it, and then gets
+`authorisation: verified`:
+
+```bash
+cat > signers.json <<'EOF'
+{ "schema": "sheaf.trusted-signers/1",
+  "signers": [ { "key_id": "payer-key-1", "public_key_base64": "<principal public key>",
+                 "party_id": "payer_demo_001", "roles": ["mandate", "delegation", "consent"],
+                 "active_from": "2026-01-01T00:00:00Z", "active_until": null } ] }
+EOF
+sheaf dispute verify ./bundle.sheaf --offline --trust ./.sheaf/trust.json \
+  --signers ./signers.json --require-verified-authorisation
+```
+
+That pin is the relying party's own assertion, not SAP identity. See
+`packages/verify/README.md` → "Signature classification and authorisation".
+Without principal signatures: `VALID (partial)` with `mandate_signature`,
+`delegation_signature`, `delegation_root` and `consent_signature` listed as
+evidence gaps.
+
+Bundles exported **before** this fix carry recorder-signed documents labelled
+`principal_signature`. The verifier still accepts their integrity, but reports
+`VALID (partial)`, prints `authorisation: recorder-attested only`, and emits
+`warning: RECORDER_SIGNED_NOT_PRINCIPAL` for each affected section.
 
 `local sync` computes the same Merkle root, signs the anchor request with the
 local key, and POSTs it to the Worker:

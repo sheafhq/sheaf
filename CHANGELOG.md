@@ -2,6 +2,102 @@
 
 All notable changes to Sheaf packages and the recorder Worker.
 
+## 2026-11-17 — SECURITY (S1): recorder no longer manufactures principal signatures
+
+**Bug:** `sheaf local export` signed the mandate, delegation and consent with
+the local ledger (recorder) key, and labelled the delegation root
+`principal_signature`. The verifier accepted it as `VALID (complete)` with no
+evidence gaps, so a recorder signature was presented as the principal's
+authorisation. The hosted bundle builder also inferred `principal_signature`
+from the mere presence of a signature, whatever key made it.
+
+**Fix:**
+- `src/local.ts`: local export copies case documents **without signing**.
+  It refuses recorder-signed documents (`RECORDER_SIGNED_NOT_PRINCIPAL`) and
+  documents whose signature no longer verifies (`DOCUMENT_SIGNATURE_INVALID`).
+  The root attestation is derived from a real principal signature, otherwise
+  `recorder_observed`.
+- New `sheaf local sign-document <doc> --key <principal.pem> --key-id <id>`
+  signs with a principal-held key. It refuses the ledger key and pinned
+  recorder keys (`SIGNING_KEY_IS_RECORDER_KEY`).
+- `src/dispute.ts` (builder): a recorder-key signature is never inferred as
+  principal or policy authorisation. An explicit such claim fails the build.
+- `@sheafhq/verify`: a document signed with any known recorder key (the
+  bundle's own, pinned or `--trust`) counts as **unsigned**. The evidence gap is
+  added and `complete` is false. The new additive `warnings[]` field and
+  formatter lines report `authorisation: recorder-attested only` and
+  `warning: RECORDER_SIGNED_NOT_PRINCIPAL [...]`.
+- **Historical evidence is preserved:** old bundles stay `valid` for
+  integrity; only the authorisation claim is downgraded (`VALID (partial)`).
+- `dispute-verify.html` rebuilt with the fix.
+- `scripts/build-dispute-verifier.mjs`: a replacer function instead of a
+  replacement string. `$`-patterns in the minified JS were splicing template
+  text into the script.
+
+**Security review follow-ups (same day):**
+- **Key-spelling bypass, fixed.** Classification first compared base64
+  *strings*. Lenient decoding (missing padding, whitespace, non-zero padding
+  bits) gave one recorder key several spellings that all verified, so a
+  re-spelled recorder key classified as a principal key and the legacy bundle
+  went back to `VALID (complete)`. Now:
+  - document signatures must be canonically encoded, or
+    `EVIDENCE_DOC_SIGNATURE_INVALID`;
+  - every key comparison (verifier, builder, local export, `sign-document`)
+    uses raw key bytes;
+  - `key_id` never influences classification.
+- **Keyless signatures (strict Ed25519).** Measured: native WebCrypto Ed25519
+  (Node 22 / OpenSSL 3.5.9, Node 24 / OpenSSL 3.5.5, Edge 157) enforces S < L
+  but **accepts small-order public keys**. The identity key (also in its
+  non-canonical spellings) verifies R = identity, S = 0 for every message, so
+  any document could carry a "valid" signature with no private key at all.
+  `verifyEd25519` now applies a strict profile first, in every runtime:
+  canonical, on-curve, non-small-order A and R, and S < L.
+  `decodeEd25519Point` no longer mutates its input (`Buffer#slice` is a view).
+- **Unverified root attestations.** A `delegation.root.attestation` claiming
+  `principal_signature` was accepted on its label. It now counts only when
+  backed by a verified signature in the bundle (same key bytes and identical
+  signature). Otherwise it adds `ROOT_ATTESTATION_UNVERIFIED` and the
+  `delegation_root` gap.
+- **Unrecognised keys are never authenticated principals.** New result fields:
+  - `authorisation`: `verified | unauthenticated | recorder_attested | absent |
+    not_evaluated`, printed on line 2 of every report;
+  - `signatures[]`, one per document, with `cryptographically_valid`,
+    `key_class` (`recognised_recorder | unrecognised | trusted_signer`),
+    `expected_party` and `principal_authenticated`.
+
+  `verified` is only reachable through relying-party signer pins
+  (`trusted_signers` / `--signers`, schema `sheaf.trusted-signers/1`), each
+  bound to a party, role and time window. Recorder keys can never be pinned.
+  The new CLI flag `--require-verified-authorisation` fails closed otherwise.
+  `complete` keeps its meaning (evidence present and signed by a non-recorder
+  key), so historical bundles keep their evidence verdict. The terminology is
+  defined in `packages/verify/README.md`, and the browser trust mechanism in
+  `packages/verify/trust/README.md`.
+- **Tests:**
+  - `test/s1-review.test.mjs`: 43 tests with 29 deterministic adversarial
+    variants from `test/s1-variants.mjs`. They cover multiple, mixed, unknown,
+    array and extra signatures, renamed key IDs, re-spelled keys, forged
+    roots, self-generated keys, keyless and weak keys, malleated S,
+    small-order R, and signer pins (valid, wrong party, wrong role, expired,
+    unbacked root, recorder key, weak key).
+  - They also cover the strict-Ed25519 vectors, determinism, CLI equivalence,
+    the fail-closed flag, and wording.
+  - The browser suite checks every variant for byte-identical CLI/browser
+    output, plus keyless rejection in Edge.
+
+**Behaviour change:** local exports without principal signatures are now
+`VALID (partial)`, not `VALID (complete)`. Every report now has an
+`authorisation:` line 2 and per-document `signature [...]` lines. Signatures
+on small-order keys, non-canonical points or small-order R are now invalid.
+See `docs/AUTHORING.md`.
+
+**Tests:**
+- `test/local-signing.test.mjs`: 9 tests, including a genuine legacy fixture
+  made by the pre-fix code (`test/fixtures/s1/`).
+- `test/browser.test.mjs`: 2 browser parity tests.
+- `test/local.test.mjs` now signs with a principal key; this is the one
+  intentional expectation change.
+
 ## 2026-11-17 — Favicon + Reference Simulation (whitepaper)
 
 - Added `src/favicon.svg` (a clump of tall grass: five tapered, swaying

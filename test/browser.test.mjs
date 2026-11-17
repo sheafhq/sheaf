@@ -10,6 +10,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { spawnSync } from "node:child_process";
 
 import { chromium } from "playwright-core";
 import { runCli } from "../dist-cli/cli.js";
@@ -82,6 +83,111 @@ test("browser output is byte-for-byte identical to the CLI in offline mode", asy
     await page.goto(pathToFileURL(HTML).href + "?offline=1");
     const browserText = await dropBundle(page, bundleText);
     assert.equal(browserText, cli.text);
+  } finally {
+    await page.close();
+  }
+});
+
+// S1-6: the browser build (esbuild bundle + WebCrypto) must downgrade a
+// recorder-signed legacy bundle exactly like the CLI. The production page has
+// no trust input (pinned trust only), so drive the bundled verifier directly.
+const LEGACY = "test/fixtures/s1/legacy-recorder-signed.sheaf";
+const LEGACY_TRUST = "test/fixtures/s1/legacy-recorder-signed.trust.json";
+
+test("S1-6 legacy recorder-signed bundle: browser build output == CLI output", async () => {
+  // Real CLI in a child process: isolated stdout (the in-process capture can
+  // also catch the test reporter's own output).
+  const run = spawnSync(
+    process.execPath,
+    ["dist-cli/cli.js", "dispute", "verify", LEGACY, "--offline", "--allow-unconfirmed-anchor", "--trust", LEGACY_TRUST],
+    { encoding: "utf8" },
+  );
+  const cli = { code: run.status, text: run.stdout };
+  assert.equal(cli.code, 0, cli.text + run.stderr);
+  assert.match(cli.text, /^VALID \(partial\)/m);
+  assert.match(cli.text, /^warning: RECORDER_SIGNED_NOT_PRINCIPAL/m);
+
+  const page = await context.newPage();
+  try {
+    await page.goto(pathToFileURL(HTML).href + "?offline=1");
+    const browserText = await page.evaluate(
+      async ({ bundleText, trustText }) => {
+        const api = window.SheafDispute;
+        const result = await api.verifyDisputeBundle(JSON.parse(bundleText), {
+          trust: JSON.parse(trustText),
+        });
+        return api.formatDisputeVerification(result);
+      },
+      {
+        bundleText: readFileSync(LEGACY, "utf8"),
+        trustText: readFileSync(LEGACY_TRUST, "utf8"),
+      },
+    );
+    assert.equal(browserText, cli.text);
+  } finally {
+    await page.close();
+  }
+});
+
+test("S1 review: every adversarial variant (incl. strict-Ed25519 and signer pins) is identical in browser and CLI", async () => {
+  const { buildVariants, variantFiles, cliArgs } = await import("./s1-variants.mjs");
+  const { mkdirSync, rmSync, writeFileSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const dir = "test/tmp-s1-browser";
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(dir, { recursive: true });
+  const page = await context.newPage();
+  try {
+    await page.goto(pathToFileURL(HTML).href + "?offline=1");
+    for (const v of variantFiles(dir, await buildVariants(), writeFileSync, join)) {
+      const run = spawnSync(process.execPath, cliArgs(v), { encoding: "utf8" });
+      const browserText = await page.evaluate(
+        async ({ bundle, opts }) => {
+          const api = window.SheafDispute;
+          return api.formatDisputeVerification(await api.verifyDisputeBundle(bundle, opts));
+        },
+        { bundle: v.bundle, opts: v.opts },
+      );
+      assert.equal(browserText, run.stdout, v.name);
+    }
+  } finally {
+    await page.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("S1 strict Ed25519 in the browser: keyless signature rejected for every message", async () => {
+  const page = await context.newPage();
+  try {
+    await page.goto(pathToFileURL(HTML).href + "?offline=1");
+    // The page exposes only the dispute API; exercise strictness through it
+    // via the KEYLESS variant, and confirm the NATIVE browser verify accepts
+    // the same signature (which is why the strict profile exists).
+    const { buildVariants } = await import("./s1-variants.mjs");
+    const keyless = (await buildVariants()).find((v) => v.name.startsWith("KEYLESS: identity public key"));
+    const result = await page.evaluate(async ({ bundle, opts }) => {
+      const r = await window.SheafDispute.verifyDisputeBundle(bundle, opts);
+      const spki = new Uint8Array([0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00, 1, ...new Array(31).fill(0)]);
+      const key = await crypto.subtle.importKey("spki", spki, { name: "Ed25519" }, false, ["verify"]);
+      const sig = new Uint8Array(64); sig[0] = 1;
+      const nativeAccepts = await crypto.subtle.verify("Ed25519", key, sig, new TextEncoder().encode("anything"));
+      return { valid: r.valid, code: r.code, nativeAccepts };
+    }, { bundle: keyless.bundle, opts: keyless.opts });
+    assert.equal(result.valid, false);
+    assert.equal(result.code, "EVIDENCE_DOC_SIGNATURE_INVALID");
+    assert.equal(typeof result.nativeAccepts, "boolean"); // recorded, not asserted (platform behaviour)
+  } finally {
+    await page.close();
+  }
+});
+
+test("S1-6 walking bundle in the browser: unauthenticated, no warnings", async () => {
+  const page = await context.newPage();
+  try {
+    await page.goto(pathToFileURL(HTML).href + "?offline=1");
+    const text = await dropBundle(page, readFileSync(BUNDLE, "utf8"));
+    assert.match(text, /^authorisation: unauthenticated — /m);
+    assert.doesNotMatch(text, /warning:|AUTHENTICATED/);
   } finally {
     await page.close();
   }

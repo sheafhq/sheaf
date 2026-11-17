@@ -148,6 +148,87 @@ document is valid; callers that require a signed authorization pass
 bundle can distinguish `authorization_basis: "recorder_observed"` from a signed
 principal/policy/payer authorization.
 
+A present `document_signature` must be **canonically encoded**: standard
+base64 with padding, no whitespace, zero padding bits, a 32-byte key, and a
+64-byte signature. It must also pass **strict Ed25519**, below. Anything else
+is `EVIDENCE_DOC_SIGNATURE_INVALID`. One key therefore has exactly one
+accepted spelling.
+
+### Strict Ed25519
+
+Every signature this library verifies (recorder, evidence, everything) first
+passes a strict profile, identical in every runtime. It is the libsodium rule
+set:
+
+- the public key A and the signature's R are canonical encodings (y < p, no
+  "negative zero") of points on the curve;
+- A and R are **not of small order** (computed: 8·P ≠ identity);
+- S < L.
+
+Why this is needed: measured on 2026-11-17, native WebCrypto Ed25519 (Node 22 /
+OpenSSL 3.5.9, Node 24 / OpenSSL 3.5.5, Edge 157) **enforces S < L but accepts
+small-order public keys**. The identity key, also in its non-canonical
+spellings, verifies the keyless signature R = identity, S = 0 for **every**
+message; order-8 keys verify it for about 1 message in 8. Without the strict
+profile, anyone could attach a "cryptographically valid" signature to any
+document **without any private key**.
+
+## Signature classification and authorisation
+
+The verifier keeps five notions apart:
+
+| Notion | Meaning |
+|---|---|
+| **cryptographically valid** | The signature passes strict Ed25519 over the document hash. Says nothing about who signed |
+| **recognised recorder key** | The key's raw bytes equal a recorder key in scope: the bundle's own, the pinned keys, or `--trust`. Counted as **absent** for authorisation (`RECORDER_SIGNED_NOT_PRINCIPAL`) |
+| **unrecognised key** | Any other key. **Self-asserted:** it is embedded in the document. Anyone can make one, including a recorder holding a second key. Never authenticates anyone |
+| **authenticated principal** | The key is pinned **by the relying party** (`trusted_signers` / `--signers`) to the exact party the document names (mandate principal, delegation issuer, consent payer, or merchant for `merchant_signature`), for that role, and the event time falls in the pin's window. Relative to the relying party's own pins; **not** SAP identity |
+| **verified authorisation** | Every authorising document is signed by an authenticated principal, and the delegation root is backed by one of those signatures |
+
+Classification uses raw key bytes, never base64 strings, never `key_id`.
+A recorder key can never be a trusted signer; such a pin is ignored with
+`TRUSTED_SIGNER_IS_RECORDER`. Malformed or weak pins are ignored with
+`TRUSTED_SIGNER_INVALID`.
+
+The **delegation-root attestation** is a claim inside the bundle. It counts
+only if backed by a signature that verified in the same bundle: the same key
+bytes **and** the identical signature as the mandate's or the first
+delegation's. Otherwise it produces `ROOT_ATTESTATION_UNVERIFIED` and the
+`delegation_root` gap.
+
+Extra fields inside `document_signature` are ignored and can't change the
+classification. A non-object signature is invalid. Extra fields elsewhere
+change the document hash (`EVIDENCE_DOC_HASH_MISMATCH`).
+
+The report has two separate axes. Line 1 is the **evidence** verdict; line 2 is
+**always** the authorisation tier:
+
+| Label | Means | Does **not** mean |
+|---|---|---|
+| `VALID (complete)` | Integrity passed; every evidence section is present and signed by a **non-recorder** key; payloads and claims present | That anyone authenticated as the principal. Read line 2 |
+| `VALID (partial)` | Integrity passed; at least one `evidence_gaps` entry | Anything about who authorised |
+| `VALID (integrity only; anchor unconfirmed)` | Integrity passed offline; the anchor transaction wasn't checked on-chain | That the root is on Base |
+| `authorisation: verified` | Every authorising document is signed by a relying-party-pinned signer for the party it names, and the root is backed | SAP identity; it rests on the relying party's pins |
+| `authorisation: unauthenticated` | Signatures are cryptographically valid, but by unrecognised keys | That the named principal signed |
+| `authorisation: recorder-attested only` | A recorder key signed evidence documents; those count as absent | That the principal did or didn't authorise |
+| `authorisation: absent` | An authorising document is missing or unsigned | Anything about authorisation |
+| `authorisation: not evaluated` | The bundle isn't valid | — |
+| `recorder_observed` (bundle `authorization_basis`) | Producer label: no non-recorder signature backs the document | That anyone authorised it |
+
+`authorization_basis` values inside a bundle (e.g. `principal_signature`)
+are the **producer's claims**, kept for compatibility with historical bundles.
+The verifier never treats them as authentication; `authorisation` and the
+per-signature `signatures[]` entries are authoritative.
+
+Each evidence document also gets a line such as:
+
+```
+signature [mandate]: valid signature, key unrecognised (…); names party payer_demo_001; principal not authenticated
+```
+
+`--require-verified-authorisation` (CLI) exits 1 unless the tier is
+`verified`.
+
 ## Primitives
 
 The building blocks are also exported if you want to use them directly:
