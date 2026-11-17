@@ -1,30 +1,50 @@
 #!/usr/bin/env node
 // CLI entry for sheaf-mcp-recorder.
 //
+//   sheaf-mcp-recorder init
 //   sheaf-mcp-recorder wrap --local --policy ./policy.json -- npx server
 //   sheaf-mcp-recorder --wrap npx server
 //
+// `init` creates a hosted chain + account + local credentials (.sheaf/).
+//
 // Environment variables:
 //   SHEAF_RECORDER_URL   hosted recorder URL (ignored in --local mode)
-//   SHEAF_CHAIN_ID       chain identifier (remote; optional local)
+//   SHEAF_CHAIN_ID       chain identifier (remote; optional local). Remote
+//                        mode auto-loads it from .sheaf/config.json.
+//   SHEAF_API_KEY        account key (remote). Auto-loaded from
+//                        .sheaf/credentials.json if present.
 //   SHEAF_ACTOR          actor written into every event
 //   SHEAF_CAPTURE_METHODS  comma-separated JSON-RPC methods
 //   SHEAF_DEBUG=1        verbose stderr logging
 
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 
+import { installGlobalScrubber } from "./scrub.js";
 import { hashCanonical } from "./canonical.js";
 import { runProxy } from "./proxy.js";
+import { runInit } from "./init.js";
 import { validatePolicy, type PolicyDocument } from "./policy.js";
 import type { RecorderConfig } from "./types.js";
 
+// Install the key scrubber BEFORE anything else can print. Any Sheaf API key
+// written to stdout, stderr, console.*, or thrown in an error message is
+// rewritten to [REDACTED_SHEAF_KEY]. The key itself lives in
+// .sheaf/credentials.json (chmod 600); the scrubber cannot touch files.
+installGlobalScrubber();
+
 const argv = process.argv.slice(2);
+
+const DEFAULT_URLS = [
+  "https://api.sheafhq.io",
+  "https://sheaf-recorder.goldencalf.workers.dev",
+];
 
 function die(msg: string, code = 2): never {
   console.error(`sheaf-mcp-recorder: ${msg}`);
   console.error(
     "usage:\n" +
+      "  sheaf-mcp-recorder init\n" +
       "  sheaf-mcp-recorder wrap --local --policy <policy.json> [--chain-dir ./.sheaf] [--case <case.json>] <command> [args...]\n" +
       "  sheaf-mcp-recorder --wrap <command> [args...]\n" +
       "  (remote mode requires SHEAF_CHAIN_ID; local mode writes ./.sheaf/ledger.jsonl)",
@@ -32,6 +52,20 @@ function die(msg: string, code = 2): never {
   process.exit(code);
 }
 
+if (argv[0] === "init") {
+  runInit({
+    recorderUrls: process.env.SHEAF_RECORDER_URL ? [process.env.SHEAF_RECORDER_URL] : DEFAULT_URLS,
+    cwd: process.cwd(),
+    logDebug: process.env.SHEAF_DEBUG === "1",
+  }).catch((err) => {
+    console.error(`sheaf-mcp-recorder init: ${(err as Error).message}`);
+    process.exit(1);
+  });
+} else {
+  runWrap();
+}
+
+function runWrap(): void {
 let local = false;
 let policyPath: string | undefined;
 let chainDir = "./.sheaf";
@@ -94,16 +128,31 @@ if (policyPath) {
   policyHash = "sha256:" + hashCanonical(policy);
 }
 
+// Remote mode: auto-load chain_id + api_key from .sheaf/ (written by
+// `init`) when the env vars are missing.
+let envChainId = process.env.SHEAF_CHAIN_ID;
+let apiKey = process.env.SHEAF_API_KEY;
+if (!local && (!envChainId || !apiKey)) {
+  const sheafDir = join(process.cwd(), ".sheaf");
+  const configPath = join(sheafDir, "config.json");
+  const credsPath = join(sheafDir, "credentials.json");
+  if (existsSync(configPath) && !envChainId) {
+    try {
+      envChainId = JSON.parse(readFileSync(configPath, "utf8")).chain_id;
+    } catch {}
+  }
+  if (existsSync(credsPath) && !apiKey) {
+    try {
+      apiKey = JSON.parse(readFileSync(credsPath, "utf8")).api_key;
+    } catch {}
+  }
+}
+
 const chainId =
   chainIdFlag ??
-  process.env.SHEAF_CHAIN_ID ??
+  envChainId ??
   (local ? "local" : undefined);
-if (!chainId) die("SHEAF_CHAIN_ID env var is required for remote mode");
-
-const DEFAULT_URLS = [
-  "https://api.sheafhq.io",
-  "https://sheaf-recorder.goldencalf.workers.dev",
-];
+if (!chainId) die("SHEAF_CHAIN_ID not set and no .sheaf/config.json found (run `sheaf-mcp-recorder init` first)");
 const recorderUrls = local
   ? []
   : process.env.SHEAF_RECORDER_URL
@@ -113,6 +162,7 @@ const recorderUrls = local
 const cfg: RecorderConfig = {
   recorderUrls,
   chainId,
+  apiKey: local ? null : (apiKey ?? null),
   actor: actorFlag ?? process.env.SHEAF_ACTOR ?? chainId,
   captureMethods: new Set(
     (
@@ -142,7 +192,7 @@ if (cfg.logDebug) {
   console.error(
     local
       ? `[sheaf] local chain=${cfg.chainId} dir=${cfg.local!.chainDir} actor=${cfg.actor}`
-      : `[sheaf] recorders=[${cfg.recorderUrls.join(",")}] chain=${cfg.chainId} actor=${cfg.actor} capture=[${[...cfg.captureMethods].join(",")}]`,
+      : `[sheaf] recorders=[${cfg.recorderUrls.join(",")}] chain=${cfg.chainId} actor=${cfg.actor} capture=[${[...cfg.captureMethods].join(",")}] authed=${cfg.apiKey ? "yes" : "no"}`,
   );
   if (cfg.policy && cfg.policyHash) {
     console.error(
@@ -151,4 +201,5 @@ if (cfg.logDebug) {
   }
 }
 
-runProxy(cfg, command, commandArgs);
+runProxy(cfg, command!, commandArgs);
+}

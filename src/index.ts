@@ -21,7 +21,6 @@ import {
   verifyStripeSignature,
 } from "./billing.js";
 import { buildCreateAuthHeaders, extractPayer } from "./x402.js";
-import { renderReceiptPage } from "./receipt-page.js";
 import DISPUTE_VERIFY_HTML from "../dispute-verify.html";
 import SAMPLE_BUNDLE from "../test/fixtures/dispute-walking/bundle.sheaf";
 import FIREWALL_BUNDLE from "../test/fixtures/dispute-walking/bundle-policy.sheaf";
@@ -37,10 +36,12 @@ import {
   LEGACY_ACCOUNT_ID,
   lookupAccountByKey,
   parseBearer,
+  revokeKey,
   type Plan,
 } from "./accounts.js";
 import { renderChainPage, type ChainSummary } from "./chain-page.js";
 import { renderBadge } from "./badge.js";
+import { renderReceiptPage, type ReceiptPageData } from "./receipt-page.js";
 import type {
   ChainHead,
   Envelope,
@@ -528,41 +529,163 @@ app.get("/c/:chain_id", async (c) => {
   return c.body(renderChainPage(summary, base));
 });
 
+// Public proof-of-existence receipt page. Default is content-hidden: we
+// confirm the receipt exists, where it sits in the chain, that the recorder
+// signed it, and (if anchored) what Base tx commits its Merkle root — but
+// NOT the tool name, actor, intent, arguments, or exact timestamp. Receipt
+// URLs are the operator's distribution loop; nothing content-level leaks.
 app.get("/r/:chain_id/:seq", async (c) => {
-  if (!c.env.DB) return c.body("DB binding missing", 500);
-  const chainId = c.req.param("chain_id") ?? "";
-  const seq = Number.parseInt(c.req.param("seq") ?? "", 10);
-  if (!chainId || !Number.isInteger(seq) || seq < 0) {
-    return c.body("invalid receipt", 400);
+  if (!c.env.DB) return c.json({ error: "DB binding missing" }, 500);
+  const chainId = c.req.param("chain_id");
+  const seqStr = c.req.param("seq");
+  if (!chainId) return c.json({ error: "chain_id required" }, 400);
+  const seq = Number.parseInt(seqStr ?? "", 10);
+  if (!Number.isInteger(seq) || seq < 0) {
+    return c.json({ error: "seq must be a non-negative integer" }, 400);
   }
-  const row = (await c.env.DB.prepare(
-    `SELECT e.chain_id, e.seq, e.tool, e.result, e.ts, e.epoch_id,
-            e.envelope_hash, ep.anchor_tx_hash
-     FROM events e
-     LEFT JOIN epochs ep ON ep.epoch_id = e.epoch_id
-     WHERE e.chain_id = ? AND e.seq = ?`,
+  const base = new URL(c.req.url).origin;
+
+  const chainRow = (await c.env.DB.prepare(
+    "SELECT event_count FROM chains WHERE chain_id = ?",
   )
-    .bind(chainId, seq)
-    .first()) as Record<string, unknown> | null;
-  if (!row) return c.body("receipt not found", 404);
+    .bind(chainId)
+    .first()) as { event_count: number } | null;
+  const eventRow = chainRow
+    ? ((await c.env.DB.prepare(
+        "SELECT envelope_hash, ts, epoch_id FROM events WHERE chain_id = ? AND seq = ?",
+      )
+        .bind(chainId, seq)
+        .first()) as {
+        envelope_hash: string;
+        ts: number;
+        epoch_id: number | null;
+      } | null)
+    : null;
+  const epochRow = eventRow?.epoch_id !== null && eventRow?.epoch_id !== undefined
+    ? ((await c.env.DB.prepare(
+        "SELECT anchor_tx_hash, anchor_block, merkle_root FROM epochs WHERE epoch_id = ?",
+      )
+        .bind(eventRow.epoch_id)
+        .first()) as {
+        anchor_tx_hash: string | null;
+        anchor_block: number | null;
+        merkle_root: string;
+      } | null)
+    : null;
+
+  const data: ReceiptPageData = {
+    chain_id: chainId,
+    seq,
+    chain: {
+      exists: Boolean(chainRow),
+      event_count: chainRow?.event_count ?? 0,
+      issuer: c.env.ISSUER,
+      issuer_key_id: activeKey().key_id,
+      recorder_public_key: activeKey().public_key_base64,
+    },
+    receipt: {
+      exists: Boolean(eventRow),
+      envelope_hash: eventRow?.envelope_hash ?? null,
+      seq,
+      coarse_window_utc_date: eventRow
+        ? new Date(eventRow.ts * 1000).toISOString().slice(0, 10)
+        : null,
+      epoch_id: eventRow?.epoch_id ?? null,
+      anchor_tx: epochRow?.anchor_tx_hash ?? null,
+      anchor_block: epochRow?.anchor_block ?? null,
+      merkle_root: epochRow?.merkle_root ?? null,
+    },
+  };
   c.header("Content-Type", "text/html; charset=utf-8");
   c.header("Cache-Control", "public, max-age=60, s-maxage=60");
-  return c.body(
-    renderReceiptPage({
-      chain_id: String(row.chain_id),
-      seq: Number(row.seq),
-      tool: String(row.tool),
-      result: String(row.result),
-      ts: Number(row.ts),
-      epoch_id:
-        row.epoch_id === null || row.epoch_id === undefined
-          ? null
-          : Number(row.epoch_id),
-      envelope_hash: String(row.envelope_hash),
-      anchor_tx_hash:
-        typeof row.anchor_tx_hash === "string" ? row.anchor_tx_hash : null,
-    }),
-  );
+  return c.body(renderReceiptPage(data, base));
+});
+
+// Funnel stats for the WP6 human lifecycle:
+// init_run → first_event → second_event → week_1_retained → upgraded.
+// Measures real humans, not the bot funnel (which is bot_400 → 402 → paid).
+// Query by window: /stats/funnel?window=7d  (default 30d). Returns daily
+// counts suitable for sparkline rendering elsewhere.
+app.get("/stats/funnel", async (c) => {
+  if (!c.env.DB) return c.json({ error: "DB binding missing" }, 500);
+  const windowStr = c.req.query("window") ?? "30d";
+  const m = windowStr.match(/^(\d+)d$/);
+  const days = m ? Math.min(365, Math.max(1, Number.parseInt(m[1]!, 10))) : 30;
+  const nowSec = Math.floor(Date.now() / 1000);
+  const cutoff = nowSec - days * 86400;
+  const week1 = nowSec - 7 * 86400;
+
+  // init_runs: chains whose first event (seq=0) has tool='sheaf://init'
+  // and landed within the window. Count of distinct such chains.
+  const initRows = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM events
+     WHERE seq = 0 AND tool = 'sheaf://init' AND received_at >= ?`,
+  )
+    .bind(cutoff)
+    .first();
+  const initRuns = (initRows?.n as number | undefined) ?? 0;
+
+  // first_event: init'd chains that then recorded at least one more event.
+  const firstEventRows = await c.env.DB.prepare(
+    `SELECT COUNT(DISTINCT c.chain_id) AS n
+     FROM chains c
+     JOIN events e0 ON e0.chain_id = c.chain_id AND e0.seq = 0 AND e0.tool = 'sheaf://init'
+     WHERE e0.received_at >= ? AND c.event_count >= 2`,
+  )
+    .bind(cutoff)
+    .first();
+  const firstEvent = (firstEventRows?.n as number | undefined) ?? 0;
+
+  // second_event: 3+ events total (init + 2 real).
+  const secondEventRows = await c.env.DB.prepare(
+    `SELECT COUNT(DISTINCT c.chain_id) AS n
+     FROM chains c
+     JOIN events e0 ON e0.chain_id = c.chain_id AND e0.seq = 0 AND e0.tool = 'sheaf://init'
+     WHERE e0.received_at >= ? AND c.event_count >= 3`,
+  )
+    .bind(cutoff)
+    .first();
+  const secondEvent = (secondEventRows?.n as number | undefined) ?? 0;
+
+  // week_1_retained: chain with last event >= 7 days AFTER the init event.
+  const retainRows = await c.env.DB.prepare(
+    `SELECT COUNT(DISTINCT c.chain_id) AS n
+     FROM chains c
+     JOIN events e0 ON e0.chain_id = c.chain_id AND e0.seq = 0 AND e0.tool = 'sheaf://init'
+     WHERE e0.received_at >= ? AND c.updated_at - e0.received_at >= 604800`,
+  )
+    .bind(cutoff)
+    .first();
+  const retained = (retainRows?.n as number | undefined) ?? 0;
+
+  // upgraded: accounts on the pro plan (regardless of when they init'd,
+  // because plan changes don't carry a timestamp yet). This is a running
+  // total, not a window count.
+  const upgradedRows = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM accounts WHERE plan = 'pro'`,
+  )
+    .bind()
+    .first();
+  const upgraded = (upgradedRows?.n as number | undefined) ?? 0;
+
+  const rate = (num: number, den: number): number | null =>
+    den === 0 ? null : Math.round((num / den) * 1000) / 1000;
+
+  return c.json({
+    window: `${days}d`,
+    start: new Date(cutoff * 1000).toISOString(),
+    end: new Date(nowSec * 1000).toISOString(),
+    stages: {
+      init_run: { count: initRuns },
+      first_event: { count: firstEvent, rate_from_init: rate(firstEvent, initRuns) },
+      second_event: { count: secondEvent, rate_from_init: rate(secondEvent, initRuns) },
+      week_1_retained: { count: retained, rate_from_init: rate(retained, initRuns) },
+      upgraded_to_pro: { count: upgraded, note: "running total; plan upgrades not timestamped" },
+    },
+    kill_gates: {
+      note: "See claude/sheaf-self-serve-brief.md for pre-committed diagnoses. Each stage's drop-off indicates a different problem class.",
+    },
+  });
 });
 
 app.get("/badge/:slug", async (c) => {
@@ -1277,6 +1400,58 @@ app.post("/admin/anchor", async (c) => {
     anchor_tx_hash: result.anchor_tx_hash,
     base_explorer: `https://basescan.org/tx/${result.anchor_tx_hash}`,
     skipped: result.skipped,
+  });
+});
+
+// Self-revocation: authenticated holder of a key can revoke IT. Proof of
+// possession = authorization. Soft-revoke (sets revoked_at), preserving the
+// chain + audit history. The key is immediately unauthenticated for future
+// calls (lookupAccountByKey filters WHERE revoked_at IS NULL).
+//
+// Boundary: this endpoint ONLY revokes the key presented in the Authorization
+// header. It does NOT accept a target-selection body (no key_hash, no
+// account_id). Any such field in the body causes an immediate 400. This
+// prevents a confused-deputy attempt where account A uses its own auth and
+// tries to revoke account B's key via a body field. See
+// `test/security/self-revoke-boundary.sh` for the regression test.
+app.post("/accounts/me/keys/revoke", async (c) => {
+  if (!c.env.DB) return c.json({ error: "DB binding missing" }, 500);
+  const bearer = parseBearer(c.req.header("Authorization"));
+  if (!bearer) return c.json({ error: "Bearer API key required" }, 401);
+
+  // Reject any body that tries to target a different key / account. The
+  // only acceptable bodies are empty, "{}", or "{confirm: true}".
+  let body: Record<string, unknown> = {};
+  try {
+    const raw = await c.req.text();
+    if (raw.trim()) body = JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return c.json({ error: "invalid JSON body" }, 400);
+  }
+  const extraFields = Object.keys(body).filter((k) => k !== "confirm");
+  if (extraFields.length > 0) {
+    return c.json(
+      {
+        error:
+          "self-revoke takes no target selector. The only key revoked is the one in the Authorization header. To revoke a different key, authenticate with that key and call this endpoint again.",
+        rejected_fields: extraFields,
+      },
+      400,
+    );
+  }
+
+  const result = await revokeKey(c.env.DB, bearer);
+  if (!result.revoked && !result.already_revoked) {
+    return c.json({ ok: false, error: "key not found" }, 404);
+  }
+  return c.json({
+    ok: true,
+    revoked_now: result.revoked,
+    already_revoked: result.already_revoked,
+    account_id: result.account_id,
+    revoked_at_unix: result.revoked_at_unix,
+    note:
+      "This key is immediately disabled for future requests. The chain + audit history are preserved. Create a new key via POST /accounts if you need to continue operating this account.",
   });
 });
 

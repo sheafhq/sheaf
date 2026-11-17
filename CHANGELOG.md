@@ -367,6 +367,59 @@ See `docs/AUTHORING.md`.
 ### @sheafhq/verify (0.1.1 → 0.1.2)
 - CLI tries `https://api.sheafhq.io` first when resolving the recorder public key, falls back to `sheaf-recorder.goldencalf.workers.dev` on error.
 
+## 2026-11-13 — Leak-response follow-up: boundary test, scrubber coverage, keyspace docs
+
+### Self-revoke boundary hardened (regression test added)
+`POST /accounts/me/keys/revoke` now rejects any body with target-selector fields (`key_hash`, `account_id`, etc.) with HTTP 400 and a `rejected_fields` list. Previously the body was silently ignored; the bearer was still the only thing revoked, but the semantics were surprising. Shell test at `test/security/inline-boundary.sh` provisions two throwaway accounts, confirms three cross-account revoke attempts all return 400, and verifies both A and B keys remain functional after the rejected attempts. All 7 sub-tests pass against live `api.sheafhq.io`.
+
+### Scrubber coverage test (regression)
+`test/scrub.test.mjs` extended with two new tests: "scrubber catches every historical key format emitted by accounts.ts" (iterates `ALL_PREFIXES_EVER_EMITTED` × suffix variants) and "scrubber catches keys in adversarial contexts" (URL query, JSON value, Bearer header, YAML, multiline env, bare key). 11/11 pass.
+
+### Keyspace semantics clarified (code comment + this entry)
+The SHA-256 hash in `api_keys.key_hash` is computed over the WHOLE key string INCLUDING the prefix. So `sk_live_<X>` and `shf_live_<X>` hash to DIFFERENT values and are DIFFERENT credentials — the prefix is NOT display-only. This is the opposite of what was assumed in the initial leak-response write-up. Documented verbatim in `src/accounts.ts::generateApiKey` with a block comment warning any future contributor against sneaking in a prefix-stripped change. Prefix-independent lookup, if ever wanted, requires a deliberate migration (backfill or dual-lookup) — not a one-line edit.
+
+## 2026-11-12 — Credential leak response: scrub, revoke, rename prefix
+
+A WP6 smoke test earlier today printed a real `sk_live_` API key into the session transcript. Incident response, all in this commit:
+
+### Revoked (preserves chain + audit history)
+- `POST /accounts/me/keys/revoke` — new self-revoke endpoint. Proof of possession = authorization. Soft-sets `api_keys.revoked_at`. Chain `agent-4e9b492a68a8` and its one event are preserved; only future auth is disabled.
+- Verified: leaked key returned HTTP 200 on `/usage` pre-revoke, HTTP 401 immediately after. No cache invalidation needed — Worker reads D1 fresh per request.
+
+### Scrubbed
+- `@sheafhq/mcp-recorder@0.2.1` — new `src/scrub.ts` module with regex `/(?:sk|shf)_(?:live|test)_[a-f0-9]{32,}/g`. `installGlobalScrubber()` wraps `console.log`, `console.error`, `console.warn`, `console.info`, `process.stdout.write`, `process.stderr.write`, `uncaughtException`, `unhandledRejection`. Installed first thing in `cli.ts`.
+- `init` output changed: API key NO LONGER printed to stdout. MCP config snippet is written to `.sheaf/mcp-config.json` (0600). Terminal prints "cat .sheaf/mcp-config.json to see the key."
+- 9 tests in `test/scrub.test.mjs` — stdout, stderr, Error serialization, nested objects, legacy + current prefix. All pass.
+
+### Renamed (reduces grep confusion with Stripe)
+- New key prefix: `shf_live_` (was `sk_live_`). Emitted by `KEY_PREFIX` in `src/accounts.ts`.
+- `ACCEPTED_KEY_PREFIXES = ["shf_live_", "sk_live_"]` — old keys still authenticate (lookup hashes the key as-is; stored hashes unaffected).
+- `isValidKeyShape()` helper accepts both prefixes.
+
+### Grep sweep (all clean)
+- Working dir `C:/dev/sheaf`: 0 hits
+- The exact leaked key suffix: 0 hits outside this CHANGELOG entry (which only references the account_id, not the key)
+- `sheafhq/sheaf` git log (last 7 days): 0 hits
+- `sheafhq/sheaf-coherence-action` git log (last 7 days): 0 hits
+- All memory files: 0 hits
+- Recent 10 CI run logs: 0 hits
+- Only extant reservoir: the Claude Code session transcript on the owner's local disk (expected; scrubber prevents recurrence)
+
+## 2026-11-12 — WP6 ephemeral-chain onboarding + proof-of-existence receipt page + human funnel
+
+### @sheafhq/mcp-recorder (0.1.1 → 0.2.0)
+- New subcommand: `npx @sheafhq/mcp-recorder init`. Transparent account creation (operator never sees a signup form), mints a chain_id locally (`agent-<hex>`), posts a first event tagged `tool: "sheaf://init"`, writes `.sheaf/config.json` (safe to commit) + `.sheaf/credentials.json` (0600, auto-added to `.gitignore`), prints verify URL + proof URL + badge + ready-to-paste MCP config snippet for Claude Code/Desktop.
+- `--wrap` mode now auto-loads chain_id + api_key from `.sheaf/` if env vars absent — operators can just run `init` once and wrap any MCP server in the same cwd without configuring env.
+- Event submission now includes `Authorization: Bearer <api_key>` when configured (previously anonymous; works with WP2 chain ownership).
+- End-to-end smoke test: fresh temp dir → `init` → chain `agent-4e9b492a68a8` created on recorder with init event at seq=0.
+
+### Worker (sheaf-recorder)
+- **GET /r/:chain_id/:seq** — public proof-of-existence receipt page. Content-hidden by default: shows receipt exists, chain length, issuer + key_id, anchor tx (if committed) + basescan link, UTC-day-coarse window. Does NOT show tool name, actor, intent, inputs/outputs hashes, exact timestamp. In-browser "Verify" button runs `@sheafhq/verify@0.1.2` via esm.sh against Base mainnet. The receipt URL is the operator's distribution loop; nothing content-level leaks. Opt-in content disclosure is a future per-chain flag.
+- **GET /stats/funnel?window=30d** — human funnel metrics tracking `init_run → first_event → second_event → week_1_retained → upgraded_to_pro`. Keys off `tool='sheaf://init'` on seq=0 events. Replaces the "bot funnel" (template_400 → 402 → paid) as the primary measurement surface — we only have one known paid call and it was a sweep crawler, so the bot funnel is noise.
+
+### Kill gates (pre-committed before measuring)
+Written in task #74 and `feedback_hands_off.md` corollary. Each funnel stage's drop-off indicates a specific problem class and a specific response; conflating them means responding to the wrong problem.
+
 ## 2026-11-12 — Fix A+B: convert agent 400s on /bundle to actionable retries
 
 ### Observed demand signal

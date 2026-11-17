@@ -64,9 +64,52 @@ export function generateAccountId(): string {
   return "acct_" + randomHex(8);
 }
 
-/** Generate an API key + its storage hash. The key is shown to the user once. */
+/** Sheaf key prefix. Changed 2026-11-12 from `sk_live_` to `shf_live_` so
+ *  the key cannot be mistaken for a Stripe secret key in logs / search /
+ *  scrubbers. Old `sk_live_` keys still authenticate (lookup hashes the key
+ *  as-is and the stored hash still matches) — only new keys mint as shf_. */
+export const KEY_PREFIX = "shf_live_";
+
+/** Any key format Sheaf has ever issued. Lookup accepts either; generator
+ *  emits only the current KEY_PREFIX. */
+export const ACCEPTED_KEY_PREFIXES = ["shf_live_", "sk_live_"] as const;
+
+/** Is this plaintext a well-formed Sheaf API key? */
+export function isValidKeyShape(s: string): boolean {
+  for (const pfx of ACCEPTED_KEY_PREFIXES) {
+    if (s.startsWith(pfx) && /^[a-f0-9]{64}$/.test(s.slice(pfx.length))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** Generate an API key + its storage hash. The key is shown to the user once.
+ *
+ * KEYSPACE SEMANTICS (important — read before refactoring):
+ *
+ * The hash is computed over the WHOLE key string including the prefix.
+ * That means `sk_live_<suffix>` and `shf_live_<suffix>` hash to DIFFERENT
+ * values and are DIFFERENT keys — not the same key displayed two ways.
+ * The prefix is NOT display-only; it carries hash-domain separation.
+ *
+ * Consequence:
+ *   - A key issued historically as `sk_live_...` continues to authenticate
+ *     because the stored hash was computed with the sk_live_ prefix, and
+ *     the client presents the key with that same prefix. lookupAccountByKey
+ *     hashes whatever bearer string arrives.
+ *   - A new key issued today comes out as `shf_live_...` with a hash
+ *     derived from the shf_live_ prefix.
+ *   - You CANNOT swap prefixes on a key: `sk_live_X` and `shf_live_X` are
+ *     not the same credential, even with identical suffixes.
+ *
+ * If you ever want prefix-independent lookup (to let `sk_live_X` and
+ * `shf_live_X` be the same credential), you must either (a) backfill all
+ * existing api_keys rows with a new prefix-stripped hash, or (b) do a
+ * dual-lookup on the lookup path. Both are deliberate migrations; do not
+ * sneak them in by changing this function alone. */
 export async function generateApiKey(): Promise<{ key: string; hash: string }> {
-  const key = "sk_live_" + randomHex(32);
+  const key = KEY_PREFIX + randomHex(32);
   const hash = await sha256Hex(key);
   return { key, hash };
 }
@@ -139,6 +182,52 @@ export async function createAccount(
     },
     api_key: key,
   };
+}
+
+// TODO (post-WP4): admin-authenticated revoke path. Current `revokeKey` is
+// only reachable through `POST /accounts/me/keys/revoke`, which requires
+// possession of the key being revoked. If an operator loses the key (lost
+// laptop, accidental deletion, forgotten rotation) or has it stolen without
+// detecting the compromise, they have no way to revoke it. Need either:
+//   (a) email-based reset (requires accounts.email to be set — currently
+//       optional; Stripe-billed Pro accounts in WP4 will have it mandatory)
+//   (b) stripe_customer_id-based admin action gated by a Stripe-verified
+//       support session
+//   (c) manual ops channel (dangerous — SSRF-prone)
+// Build when a real operator actually asks. Until then, the self-revoke
+// path is the only revocation method and that is documented as a limitation.
+
+/** Soft-revoke an API key (sets revoked_at = now). Returns true if a row was
+ *  updated, false if the key wasn't found or was already revoked. Preserves
+ *  the chain + audit history; only disables future authentication. */
+export async function revokeKey(
+  db: Db,
+  plaintextKey: string,
+): Promise<{ revoked: boolean; already_revoked: boolean; account_id: string | null; revoked_at_unix: number | null }> {
+  const keyHash = await sha256Hex(plaintextKey);
+  const now = Math.floor(Date.now() / 1000);
+  const existing = (await db
+    .prepare(
+      "SELECT account_id, revoked_at FROM api_keys WHERE key_hash = ?",
+    )
+    .bind(keyHash)
+    .first()) as { account_id: string; revoked_at: number | null } | null;
+  if (!existing) {
+    return { revoked: false, already_revoked: false, account_id: null, revoked_at_unix: null };
+  }
+  if (existing.revoked_at !== null) {
+    return {
+      revoked: false,
+      already_revoked: true,
+      account_id: existing.account_id,
+      revoked_at_unix: existing.revoked_at,
+    };
+  }
+  await db
+    .prepare("UPDATE api_keys SET revoked_at = ? WHERE key_hash = ?")
+    .bind(now, keyHash)
+    .run();
+  return { revoked: true, already_revoked: false, account_id: existing.account_id, revoked_at_unix: now };
 }
 
 /** Look up the owner of an existing chain. Returns null if chain doesn't exist. */
