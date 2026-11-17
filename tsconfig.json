@@ -14,5 +14,6 @@
     "isolatedModules": true,
     "noEmit": true
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/cli.ts", "src/authoring.ts", "src/local.ts"]
 }

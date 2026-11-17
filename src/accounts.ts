@@ -113,14 +113,15 @@ export async function lookupAccountByKey(
 export async function createAccount(
   db: Db,
   email: string | null,
+  plan: Plan = "free",
 ): Promise<{ account: Account; api_key: string }> {
   const accountId = generateAccountId();
   const createdAt = Math.floor(Date.now() / 1000);
   await db
     .prepare(
-      "INSERT INTO accounts (account_id, email, plan, created_at) VALUES (?, ?, 'free', ?)",
+      "INSERT INTO accounts (account_id, email, plan, created_at) VALUES (?, ?, ?, ?)",
     )
-    .bind(accountId, email, createdAt)
+    .bind(accountId, email, plan, createdAt)
     .run();
   const { key, hash } = await generateApiKey();
   await db
@@ -133,7 +134,7 @@ export async function createAccount(
     account: {
       account_id: accountId,
       email,
-      plan: "free",
+      plan,
       created_at: createdAt,
     },
     api_key: key,

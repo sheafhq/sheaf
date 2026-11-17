@@ -1,0 +1,27 @@
+{
+  "note": "Captured from https://sheaf-recorder.goldencalf.workers.dev/events/smoke-test-1/0 before event.kind existed. No kind field is present.",
+  "envelope": {
+    "v": "arca/1",
+    "event": {
+      "intent": "smoke test",
+      "actor": "test-agent-001",
+      "authority": null,
+      "tool": "mcp://test/noop",
+      "inputs_hash": "sha256:aaaa",
+      "outputs_hash": "sha256:bbbb",
+      "result": "ok",
+      "ts": "2026-11-09T12:00:00Z"
+    },
+    "chain": {
+      "chain_id": "smoke-test-1",
+      "seq": 0,
+      "prev_hash": null
+    },
+    "signatures": {
+      "actor": null,
+      "recorder": "u9L91wVE8pPoGw/COsx3o+YEUeQ6GnzKzyes6Zre5ELmSzm+HLxU2l60IfAZEEZrhOQIU94uqOvLnvdj1AVLAA=="
+    }
+  },
+  "envelope_hash": "8fb991cd26a69394a05fd9b295de9e9ec7c63bba5f8754d269b37eb076ca4905",
+  "recorder_public_key_base64": "3HAltFwtHSZp83CLKYF/KKG2Ac4Se/YiD+AkfqCb+e8="
+}

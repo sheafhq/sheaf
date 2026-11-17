@@ -1,0 +1,31 @@
+{
+  "chain_id": "demo-dispute-walking-20261112t213407z",
+  "anchorer": "0x08A22c6899a8b2eccA4b2B752a89eD498d7b2100",
+  "anchorer_note": "The hosted recorder's canonical anchorer. No funded separate demo anchorer key was available; this is a labelled demo chain.",
+  "epoch_id": 5,
+  "merkle_root": "272952fe5d7dfd7c34738353d515e52232de9bdbcb618823ce983c914da37d6e",
+  "tx_hash": "0x847c6b718e7ebc0ef0efae87f74f10bf58c14ba668832896244dee2bb3a8271a",
+  "block": 56647675,
+  "event_kinds": [
+    {
+      "seq": 0,
+      "kind": "mandate"
+    },
+    {
+      "seq": 1,
+      "kind": "delegation"
+    },
+    {
+      "seq": 2,
+      "kind": "consent"
+    },
+    {
+      "seq": 3,
+      "kind": "tool_call"
+    },
+    {
+      "seq": 4,
+      "kind": "tool_call"
+    }
+  ]
+}

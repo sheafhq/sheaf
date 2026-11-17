@@ -1,0 +1,117 @@
+# Sheaf
+
+Sheaf is a third-party execution recorder for AI agents. It captures MCP tool
+calls at the proxy boundary, signs each event outside the agent process with
+Ed25519, hash-chains the events, batches them into Merkle epochs, and anchors
+epoch roots on Base L2. A `.sheaf` bundle can be verified offline without
+trusting Sheaf's servers.
+
+Canonical site: https://sheafhq.io/
+Verifier: https://sheafhq.io/verify
+GitHub: https://github.com/sheafhq/sheaf
+Technical whitepaper: https://sheafhq.io/whitepaper
+
+## NPM packages
+
+- `@sheafhq/mcp-recorder` — MCP stdio proxy and local firewall/ledger.
+  Binary: `sheaf-mcp-recorder`
+- `@sheafhq/verify` — zero-dependency verifier for receipts and Dispute Bundles.
+  Binary: `sheaf-verify`
+- `@sheafhq/mcp-tools` — MCP server exposing `sheaf_chain_head`,
+  `sheaf_get_proof_for`, and `sheaf_verify_bundle`.
+  Binary: `sheaf-mcp-tools`
+- `packages/s3-gateway` in the repo — S3-compatible PUT gateway that records
+  `s3.put` receipts. It is not published as an npm package yet.
+
+## Install and wrap an MCP server
+
+```bash
+npm install -g @sheafhq/mcp-recorder
+export SHEAF_CHAIN_ID="my-agent-production"
+sheaf-mcp-recorder --wrap npx -y @modelcontextprotocol/server-filesystem .
+```
+
+Remote mode sends signed events to `https://api.sheafhq.io`. Set
+`SHEAF_RECORDER_URL` to use a different recorder. For local-only mode:
+
+```bash
+sheaf-mcp-recorder wrap --local \
+  --policy ./policy.json \
+  --chain-dir ./.sheaf \
+  --case ./case.json \
+  -- npx -y @modelcontextprotocol/server-filesystem .
+```
+
+Local mode writes `.sheaf/local-keys.json` (mode 0600) and an append-only
+`.sheaf/ledger.jsonl`. It makes no HTTP requests. Blocked policy calls return a
+JSON-RPC error with code `-32001` and write a `result: "blocked"` event.
+
+## Export and verify a local ledger
+
+```bash
+sheaf local export --chain-dir ./.sheaf --case ./case.json --out bundle.sheaf
+sheaf local sync --chain-dir ./.sheaf
+sheaf dispute verify bundle.sheaf --rpc https://mainnet.base.org --trust ./.sheaf/trust.json
+```
+
+`local sync` posts a signed root request to `POST /v1/anchor/local`. Once
+anchored, the next `local export` includes the Base transaction and
+`anchor_mode: base`.
+
+## Verify a remote receipt
+
+```bash
+npm install -g @sheafhq/verify
+sheaf-verify receipt.json --rpc https://mainnet.base.org
+```
+
+Or use the library:
+
+```ts
+import { verify } from "@sheafhq/verify";
+const result = await verify(bundle, {
+  base_rpc: "https://mainnet.base.org",
+  recorder_public_key_base64: "3HAltFwtHSZp83CLKYF/KKG2Ac4Se/YiD+AkfqCb+e8=",
+  expected_anchorer_address: "0x08A22c6899a8b2eccA4b2B752a89eD498d7b2100",
+});
+```
+
+## x402 paid endpoints
+
+Heavy endpoints return HTTP 402 with a `PAYMENT-REQUIRED` header when called
+without payment. Pay in USDC on Base and retry with the x402 payment header.
+
+| Method | Path | Price |
+| --- | --- | --- |
+| `GET` | `/bundle/:chain_id/:seq` | $0.001 |
+| `POST` | `/v1/anchor/local` | $0.01 |
+| `POST` | `/v1/chains/:chain_id/export` | $0.01 |
+
+Autonomous agents can use the payer helper in `@sheafhq/mcp-recorder`:
+
+```ts
+import { createX402Payer, paidFetch } from "@sheafhq/mcp-recorder";
+const payer = createX402Payer(process.env.SHEAF_PAYER_PRIVATE_KEY!);
+const response = await paidFetch(
+  "https://sheafhq.io/v1/chains/my-chain/export",
+  { method: "POST", headers: { "content-type": "application/json" }, body: "{}" },
+  payer,
+);
+```
+
+The helper parses `PAYMENT-REQUIRED`, signs the exact EIP-3009 authorization
+with a local viem account, and retries. A funded Base wallet with USDC is
+required.
+
+## Get an API key
+
+`POST https://sheafhq.io/v1/checkout` returns a Stripe Checkout URL for Sheaf
+Pro. After `checkout.session.completed`, the Worker generates an API key and
+emails it to the customer. If Stripe or email is not configured, the endpoint
+returns a structured `stripe_not_configured` / delivery-queued response rather
+than a fake checkout URL.
+
+## Machine-readable manifest
+
+`GET https://sheafhq.io/manifest` lists free and paid endpoints, payment
+metadata, and current recorder key IDs.

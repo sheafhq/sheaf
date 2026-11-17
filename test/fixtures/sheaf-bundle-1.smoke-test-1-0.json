@@ -1,0 +1,56 @@
+{
+  "note": "Captured from the live smoke-test-1 chain (event 0 + epoch 0 proof + published recorder key) in the pre-kind sheaf-bundle/1 shape.",
+  "version": "sheaf-bundle/1",
+  "envelope": {
+    "v": "arca/1",
+    "event": {
+      "intent": "smoke test",
+      "actor": "test-agent-001",
+      "authority": null,
+      "tool": "mcp://test/noop",
+      "inputs_hash": "sha256:aaaa",
+      "outputs_hash": "sha256:bbbb",
+      "result": "ok",
+      "ts": "2026-11-09T12:00:00Z"
+    },
+    "chain": {
+      "chain_id": "smoke-test-1",
+      "seq": 0,
+      "prev_hash": null
+    },
+    "signatures": {
+      "actor": null,
+      "recorder": "u9L91wVE8pPoGw/COsx3o+YEUeQ6GnzKzyes6Zre5ELmSzm+HLxU2l60IfAZEEZrhOQIU94uqOvLnvdj1AVLAA=="
+    }
+  },
+  "envelope_hash": "8fb991cd26a69394a05fd9b295de9e9ec7c63bba5f8754d269b37eb076ca4905",
+  "chain": {
+    "chain_id": "smoke-test-1",
+    "seq": 0
+  },
+  "anchor": {
+    "epoch_id": 0,
+    "leaf_index": 0,
+    "merkle_root": "1a09249a366537809ebd2b05c569349fc1aa2364d04cf0f403176c72395cbd5c",
+    "siblings": [
+      {
+        "hash": "004a97e031bd61098faaac434a1a5d9c6c910879c3bd667ded9d998ae461d113",
+        "side": "right"
+      }
+    ],
+    "tx_hash": "0xc65349d2b12bdc096e73e5e62392d658649c99eb9add9ac690249d714550b0a4",
+    "block": 55369354,
+    "network": "eip155:8453",
+    "explorer": "https://basescan.org/tx/0xc65349d2b12bdc096e73e5e62392d658649c99eb9add9ac690249d714550b0a4"
+  },
+  "issuer": {
+    "name": "sheaf",
+    "key_id": "sheaf-ed25519-2026-11-09",
+    "public_key_base64": "3HAltFwtHSZp83CLKYF/KKG2Ac4Se/YiD+AkfqCb+e8=",
+    "public_key_url": "https://sheaf-recorder.goldencalf.workers.dev/.well-known/sheaf-public-key"
+  },
+  "verification": {
+    "lib": "@sheafhq/verify",
+    "cmd": "npx -y @sheafhq/verify <save-this-bundle.json>"
+  }
+}

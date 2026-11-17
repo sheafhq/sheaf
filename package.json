@@ -4,18 +4,43 @@
   "private": true,
   "description": "Sheaf — third-party execution recorder for AI agents (Cloudflare Worker).",
   "type": "module",
+  "bin": {
+    "sheaf": "dist-cli/cli.js"
+  },
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "build:verify": "tsc -p packages/verify/tsconfig.json",
+    "build:cli": "tsc -p tsconfig.cli.json",
+    "build:recorder": "tsc -p packages/mcp-recorder/tsconfig.json",
+    "test": "npm run test:disclose && npm run test:evidence && npm run test:disclosures && npm run test:dispute && npm run test:authoring && npm run test:policy && npm run test:local && npm run test:s3-gateway && npm run test:browser",
+    "test:disclose": "tsc -p tsconfig.disclose-test.json && npm run build:verify && node test/disclose.test.mjs",
+    "test:evidence": "tsc -p tsconfig.disclose-test.json && npm run build:verify && node test/evidence.test.mjs",
+    "test:disclosures": "npm run build:verify && node packages/verify/test/trust.test.mjs",
+    "test:dispute": "npm run build:verify && npm run build:cli && node test/dispute.test.mjs",
+    "test:authoring": "npm run build:verify && npm run build:cli && node test/authoring.test.mjs",
+    "test:policy": "tsc -p tsconfig.disclose-test.json && npm run build:verify && npm run build:cli && npm run build:recorder && node test/policy.test.mjs",
+    "demo:firewall": "node scripts/make-policy-walking-skeleton.mjs",
+    "test:local": "npm run build:verify && npm run build:cli && npm run build:recorder && node test/local.test.mjs",
+    "test:local:e2e": "npm run build:verify && npm run build:cli && npm run build:recorder && node test/local-proxy.e2e.mjs",
+    "build:s3-gateway": "npm run build --prefix packages/s3-gateway",
+    "test:s3-gateway": "npm test --prefix packages/s3-gateway",
+    "test:browser": "npm run build:verify && npm run build:cli && node test/browser.test.mjs",
     "deploy": "wrangler deploy",
     "tail": "wrangler tail"
   },
   "dependencies": {
+    "@x402/core": "^2.30.0",
+    "@x402/evm": "^2.30.0",
+    "@x402/extensions": "^2.30.0",
+    "@x402/hono": "^2.30.0",
     "hono": "^4.13.7",
     "viem": "^2.21.0"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20250101.0",
+    "@cloudflare/workers-types": "^5.20261113.1",
+    "@types/node": "^22.20.5",
+    "playwright-core": "^1.65.0",
     "typescript": "^5.6.0",
-    "wrangler": "^3.90.0"
+    "wrangler": "^4.161.0"
   }
 }

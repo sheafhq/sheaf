@@ -9,7 +9,13 @@
 // Exits 0 if the bundle is valid, 1 if not, 2 for argument / fetch errors.
 
 import { readFileSync } from "node:fs";
-import { verify } from "./index.js";
+import {
+  verify,
+  verifyDisclosures,
+  defaultTrustStore,
+  type DisclosureSet,
+  type TrustStore,
+} from "./index.js";
 
 const DEFAULT_RPC = "https://mainnet.base.org";
 const DEFAULT_ANCHORER = "0x08A22c6899a8b2eccA4b2B752a89eD498d7b2100";
@@ -20,6 +26,9 @@ type Args = {
   anchorer: string;
   recorderKey?: string;
   recorderUrl?: string;
+  dispute: boolean;
+  offline: boolean;
+  trustPath?: string;
 };
 
 function die(msg: string, code = 2): never {
@@ -35,9 +44,12 @@ function die(msg: string, code = 2): never {
       "  --recorder-key <base64>       Recorder Ed25519 public key (base64)",
       "  --recorder-url <url>          Recorder base URL to fetch /.well-known/sheaf-public-key",
       "                                (default: use key embedded in bundle; or https://sheaf-recorder.goldencalf.workers.dev)",
+      "  --dispute                     Verify a sheaf-disclosure/1 set using the pinned trust store",
+      "  --offline                     Dispute mode only: skip the Base RPC anchor check",
+      "  --trust <path>                Dispute mode only: JSON {recorder_keys, anchorers}",
       "",
-      "If neither --recorder-key nor the bundle's issuer.public_key_base64 is",
-      "present, the CLI fetches /.well-known/sheaf-public-key from --recorder-url.",
+      "Legacy sheaf-bundle/1 behavior is unchanged. In --dispute mode the key and",
+      "anchorer come from the pinned trust store; public_key_url is never fetched.",
     ].join("\n"),
   );
   process.exit(code);
@@ -45,17 +57,32 @@ function die(msg: string, code = 2): never {
 
 function parseArgs(argv: string[]): Args {
   const rest: string[] = [];
-  const a: Partial<Args> = { rpc: DEFAULT_RPC, anchorer: DEFAULT_ANCHORER };
+  const a: Partial<Args> = {
+    rpc: DEFAULT_RPC,
+    anchorer: DEFAULT_ANCHORER,
+    dispute: false,
+    offline: false,
+  };
   for (let i = 0; i < argv.length; i++) {
     const v = argv[i]!;
     if (v === "--rpc") a.rpc = argv[++i] ?? die("--rpc requires a URL");
     else if (v === "--anchorer") a.anchorer = argv[++i] ?? die("--anchorer requires an address");
     else if (v === "--recorder-key") a.recorderKey = argv[++i] ?? die("--recorder-key requires a value");
     else if (v === "--recorder-url") a.recorderUrl = argv[++i] ?? die("--recorder-url requires a URL");
+    else if (v === "--dispute") a.dispute = true;
+    else if (v === "--offline") a.offline = true;
+    else if (v === "--trust") a.trustPath = argv[++i] ?? die("--trust requires a path");
     else if (v === "--help" || v === "-h") die("", 0);
     else rest.push(v);
   }
   if (rest.length !== 1) die("expected exactly one bundle path (or '-' for stdin)");
+  if (a.offline && !a.dispute) die("--offline requires --dispute");
+  if (a.trustPath && !a.dispute) die("--trust requires --dispute");
+  if (a.dispute && (a.recorderKey || a.recorderUrl)) {
+    die(
+      "--recorder-key/--recorder-url are legacy-only; dispute mode uses the pinned --trust store",
+    );
+  }
   return { ...(a as Args), bundlePath: rest[0] as string };
 }
 
@@ -166,9 +193,61 @@ async function resolveRecorderKey(
   die(`could not fetch recorder public key: ${(lastErr as Error)?.message ?? "unknown error"}`);
 }
 
+function loadTrust(path: string): TrustStore {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(path, "utf8"));
+  } catch (err) {
+    die(`could not read trust file: ${(err as Error).message}`);
+  }
+  const t = parsed as Partial<TrustStore>;
+  if (!Array.isArray(t.recorder_keys) || !Array.isArray(t.anchorers)) {
+    die("trust file must contain recorder_keys[] and anchorers[]");
+  }
+  return t as TrustStore;
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const bundle = (await readBundle(args.bundlePath)) as BundleShape;
+
+  if (args.dispute) {
+    const disclosure = bundle as unknown as DisclosureSet;
+    const trust = args.trustPath ? loadTrust(args.trustPath) : defaultTrustStore();
+    const result = await verifyDisclosures(disclosure, {
+      mode: "dispute",
+      trust,
+      ...(args.offline ? {} : { base_rpc: args.rpc }),
+    });
+
+    const marks = { true: "✓", false: "✗", null: "–" } as const;
+    const suffix = result.anchor_confirmed
+      ? " (anchor confirmed)"
+      : " (integrity only; anchor unconfirmed)";
+    console.log(result.valid ? `VALID${suffix}` : "NOT VALID");
+    if (result.code) console.log(`code: ${result.code}`);
+    if (result.reason) console.log(`reason: ${result.reason}`);
+    if (result.failed_event_ref) {
+      console.log(
+        `failed event: ${result.failed_event_ref.chain_id}/${result.failed_event_ref.seq}`,
+      );
+    }
+    console.log(
+      `chain: ${disclosure.chain_id} seq ${disclosure.from_seq}..${disclosure.to_seq}`,
+    );
+    if (Array.isArray(disclosure.warnings) && disclosure.warnings.length > 0) {
+      for (const warning of disclosure.warnings) {
+        console.log(`warning: ${warning}`);
+      }
+    }
+    console.log("checks:");
+    for (const [k, v] of Object.entries(result.checks)) {
+      const mark = marks[String(v) as "true" | "false" | "null"] ?? "?";
+      console.log(`  ${mark} ${k}`);
+    }
+    process.exit(result.valid ? 0 : 1);
+  }
+
   const recorderKey = await resolveRecorderKey(bundle, args);
   const verifyInput = normalize(bundle);
   const result = await verify(verifyInput as never, {

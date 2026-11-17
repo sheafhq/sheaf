@@ -1,11 +1,20 @@
 // Build an event envelope + submit to the Sheaf recorder. Submission is a
 // background best-effort operation: it must never block the MCP proxy pipeline,
 // and a recorder outage must not break the agent's tool calls.
+//
+// Policy events are queued before any tool-call event, so a new chain starts
+// with the policy commitment. Blocked attempts are queued with result
+// "blocked" and their policy verdict.
 
-import { canonicalize, hashCanonical, sha256Hex } from "./canonical.js";
-import type { PendingCall, RecorderConfig } from "./types.js";
+import { canonicalize, sha256Hex } from "./canonical.js";
+import type { PolicyDecision } from "./policy.js";
+import type {
+  PendingCall,
+  PolicyMetadata,
+  RecorderConfig,
+} from "./types.js";
 
-type EventResult = "ok" | "error" | "timeout" | "cancelled";
+type EventResult = "ok" | "error" | "timeout" | "cancelled" | "blocked";
 
 type SubmissionReceipt = {
   ok?: true;
@@ -18,7 +27,7 @@ type SubmissionReceipt = {
 };
 
 type ChainState = {
-  seq: number;        // next seq to write (head_seq + 1)
+  seq: number; // next seq to write (head_seq + 1)
   prev_hash: string | null;
 };
 
@@ -28,6 +37,9 @@ export class RecorderClient {
 
   constructor(private cfg: RecorderConfig) {
     this.state = this.fetchInitialState();
+    if (this.cfg.policy && this.cfg.policyHash) {
+      this.queue = this.queue.then(() => this.submitPolicyInternal());
+    }
   }
 
   private debug(...args: unknown[]) {
@@ -81,7 +93,7 @@ export class RecorderClient {
     }
   }
 
-  /** Queue an event submission. Returns immediately; does not block the caller. */
+  /** Queue a normal tool-call event. Returns immediately. */
   submit(
     call: PendingCall,
     response: { result?: unknown; error?: { message: string } } | null,
@@ -89,9 +101,127 @@ export class RecorderClient {
     this.queue = this.queue.then(() => this.submitInternal(call, response));
   }
 
+  /** Queue a blocked attempt. The caller should already have returned the
+   *  structured JSON-RPC policy error to the agent. */
+  submitBlocked(
+    call: PendingCall,
+    decision: PolicyDecision,
+    policyHash: string,
+  ): void {
+    this.queue = this.queue.then(() =>
+      this.submitBlockedInternal(call, decision, policyHash),
+    );
+  }
+
   /** Wait for all queued submissions to finish. Call before process exit. */
   async drain(): Promise<void> {
     await this.queue;
+  }
+
+  private async postEvent(event: Record<string, unknown>): Promise<void> {
+    const state = await this.state;
+    const envelope = {
+      v: "arca/1" as const,
+      event,
+      chain: {
+        chain_id: this.cfg.chainId,
+        seq: state.seq,
+        prev_hash: state.prev_hash,
+      },
+      signatures: { actor: null },
+    };
+
+    const body = canonicalize(envelope);
+    const r = await this.fetchWithFallback(`/events`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body,
+    });
+    const receipt = (await r.json()) as SubmissionReceipt;
+
+    if (r.status === 201 && receipt.ok && typeof receipt.seq === "number") {
+      this.state = Promise.resolve({
+        seq: receipt.seq + 1,
+        prev_hash: receipt.envelope_hash ?? state.prev_hash,
+      });
+      this.debug(
+        `recorded seq=${receipt.seq} for ${String(event.tool)} → ${String(event.result)}`,
+      );
+      return;
+    }
+
+    if (
+      r.status === 409 &&
+      typeof receipt.current_head_seq === "number" &&
+      typeof receipt.current_head_hash === "string"
+    ) {
+      this.state = Promise.resolve({
+        seq: receipt.current_head_seq + 1,
+        prev_hash: receipt.current_head_hash,
+      });
+      this.debug(
+        `resynced after 409: new seq=${receipt.current_head_seq + 1} (missed this submission)`,
+      );
+      return;
+    }
+
+    this.debug(
+      `submission failed (${r.status}): ${receipt.error ?? "unknown"}; event dropped`,
+    );
+  }
+
+  private async submitPolicyInternal(): Promise<void> {
+    if (!this.cfg.policy || !this.cfg.policyHash) return;
+    try {
+      await this.postEvent({
+        kind: "policy",
+        intent: "register policy",
+        actor: this.cfg.actor,
+        authority: null,
+        tool: "sheaf.policy",
+        inputs_hash: this.cfg.policyHash,
+        outputs_hash: null,
+        result: "ok",
+        ts: new Date().toISOString(),
+        policy: {
+          schema: "sheaf.policy/1",
+          hash: this.cfg.policyHash,
+          verdict: "ALLOW",
+          reason_code: "policy_registered",
+        },
+      });
+    } catch (err) {
+      this.debug(`policy submission threw: ${(err as Error).message}`);
+    }
+  }
+
+  private async submitBlockedInternal(
+    call: PendingCall,
+    decision: PolicyDecision,
+    policyHash: string,
+  ): Promise<void> {
+    try {
+      const policy: PolicyMetadata = {
+        schema: "sheaf.policy/1",
+        hash: policyHash,
+        verdict: decision.verdict,
+        reason_code: decision.reason_code,
+      };
+      await this.postEvent({
+        kind: "tool_call",
+        intent: deriveIntent(call),
+        actor: this.cfg.actor,
+        authority: null,
+        tool: deriveToolName(call),
+        inputs_hash: "sha256:" + sha256Hex(canonicalize(inputPayload(call))),
+        outputs_hash: null,
+        result: "blocked" as EventResult,
+        ts: new Date().toISOString(),
+        policy,
+      });
+    } catch (err) {
+      this.debug(`blocked submission threw: ${(err as Error).message}`);
+    }
   }
 
   private async submitInternal(
@@ -99,8 +229,6 @@ export class RecorderClient {
     response: { result?: unknown; error?: { message: string } } | null,
   ): Promise<void> {
     try {
-      const state = await this.state;
-
       let result: EventResult = "ok";
       let outputsHash: string | null = null;
       if (!response) result = "timeout";
@@ -108,79 +236,39 @@ export class RecorderClient {
       else if (response.result !== undefined)
         outputsHash = "sha256:" + sha256Hex(canonicalize(response.result));
 
-      const inputsHash = "sha256:" + sha256Hex(canonicalize(call.params));
-
-      const envelope = {
-        v: "arca/1" as const,
-        event: {
-          intent: deriveIntent(call),
-          actor: this.cfg.actor,
-          authority: null,
-          tool: deriveToolName(call),
-          inputs_hash: inputsHash,
-          outputs_hash: outputsHash,
-          result,
-          ts: new Date().toISOString(),
-        },
-        chain: {
-          chain_id: this.cfg.chainId,
-          seq: state.seq,
-          prev_hash: state.prev_hash,
-        },
-        signatures: { actor: null },
-      };
-
-      const body = canonicalize(envelope);
-      const r = await this.fetchWithFallback(`/events`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body,
+      await this.postEvent({
+        kind: "tool_call",
+        intent: deriveIntent(call),
+        actor: this.cfg.actor,
+        authority: null,
+        tool: deriveToolName(call),
+        inputs_hash: "sha256:" + sha256Hex(canonicalize(inputPayload(call))),
+        outputs_hash: outputsHash,
+        result,
+        ts: new Date().toISOString(),
+        ...(call.policy ? { policy: call.policy } : {}),
       });
-      const receipt = (await r.json()) as SubmissionReceipt;
-
-      if (r.status === 201 && receipt.ok && typeof receipt.seq === "number") {
-        this.state = Promise.resolve({
-          seq: receipt.seq + 1,
-          prev_hash: receipt.envelope_hash ?? state.prev_hash,
-        });
-        this.debug(
-          `recorded seq=${receipt.seq} for ${envelope.event.tool} → ${envelope.event.result}`,
-        );
-        return;
-      }
-
-      // 409 with head info means our local state drifted. Re-sync and give up
-      // this one submission (the proxy will keep working; recorder stays
-      // consistent).
-      if (
-        r.status === 409 &&
-        typeof receipt.current_head_seq === "number" &&
-        typeof receipt.current_head_hash === "string"
-      ) {
-        this.state = Promise.resolve({
-          seq: receipt.current_head_seq + 1,
-          prev_hash: receipt.current_head_hash,
-        });
-        this.debug(
-          `resynced after 409: new seq=${receipt.current_head_seq + 1} (missed this submission)`,
-        );
-        return;
-      }
-
-      this.debug(
-        `submission failed (${r.status}): ${receipt.error ?? "unknown"}; event dropped`,
-      );
     } catch (err) {
       this.debug(`submit threw: ${(err as Error).message}; event dropped`);
     }
   }
 }
 
+function inputPayload(call: PendingCall): unknown {
+  if (call.method === "tools/call") {
+    const p = call.params as { arguments?: unknown } | undefined;
+    return p?.arguments ?? {};
+  }
+  return call.params;
+}
+
 function deriveToolName(call: PendingCall): string {
   const p = call.params as { name?: string; uri?: string } | undefined;
   switch (call.method) {
-    case "tools/call":
-      return `mcp://tool/${p?.name ?? "unknown"}`;
+    case "tools/call": {
+      const name = p?.name ?? "unknown";
+      return name.startsWith("mcp://") ? name : `mcp://tool/${name}`;
+    }
     case "resources/read":
       return `mcp://resource/${p?.uri ?? "unknown"}`;
     case "sampling/createMessage":

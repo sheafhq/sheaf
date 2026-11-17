@@ -1,0 +1,16 @@
+{
+  "schema": "sheaf.consent-document/1",
+  "consent_id": "consent_demo_001",
+  "payer": {
+    "type": "human",
+    "id": "payer_demo_001"
+  },
+  "agent_id": "agent://shopper-7",
+  "mandate_id": "mnd_demo_001",
+  "merchant": "northwind-outfitters.example",
+  "amount_minor": 12900,
+  "currency": "USD",
+  "consented_at": "2026-11-10T16:41:50Z",
+  "method": "payer_signature",
+  "session_id": "sess_demo_001"
+}

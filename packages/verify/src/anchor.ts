@@ -12,6 +12,32 @@ export type AnchorRecord = {
   merkle_root: string; // hex, no 0x prefix
 };
 
+/** Read the RPC's chain id so dispute mode can reject a non-Base endpoint. */
+export async function fetchChainId(rpcUrl: string): Promise<number> {
+  const resp = await fetch(rpcUrl, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "eth_chainId",
+      params: [],
+    }),
+  });
+  if (!resp.ok) {
+    throw new Error(`Base RPC error ${resp.status}: ${await resp.text()}`);
+  }
+  const body = (await resp.json()) as {
+    result?: string;
+    error?: { message: string };
+  };
+  if (body.error) throw new Error(`Base RPC: ${body.error.message}`);
+  if (typeof body.result !== "string") {
+    throw new Error("Base RPC: eth_chainId returned no result");
+  }
+  return Number(BigInt(body.result));
+}
+
 export async function fetchAnchorTx(
   rpcUrl: string,
   txHash: string,

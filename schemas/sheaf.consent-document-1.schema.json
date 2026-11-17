@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sheafhq.io/schemas/sheaf.consent-document/1",
+  "title": "Sheaf consent document v1",
+  "description": "A payer/merchant consent artifact. The document hash is sha256(JCS(this document without document_signature)); that hash is the event's inputs_hash.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "consent_id",
+    "payer",
+    "agent_id",
+    "mandate_id",
+    "merchant",
+    "amount_minor",
+    "currency",
+    "consented_at",
+    "method",
+    "session_id"
+  ],
+  "properties": {
+    "schema": { "const": "sheaf.consent-document/1" },
+    "consent_id": { "type": "string", "minLength": 1 },
+    "payer": { "$ref": "#/$defs/payer" },
+    "agent_id": { "type": "string", "minLength": 1 },
+    "mandate_id": { "type": "string", "minLength": 1 },
+    "merchant": { "type": "string", "minLength": 1 },
+    "amount_minor": { "type": "integer", "minimum": 0 },
+    "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+    "consented_at": { "type": "string", "format": "date-time" },
+    "method": {
+      "enum": [
+        "payer_signature",
+        "merchant_signature",
+        "passkey",
+        "checkout_consent",
+        "other"
+      ]
+    },
+    "session_id": { "type": "string", "minLength": 1 },
+    "document_signature": { "$ref": "#/$defs/signature" }
+  },
+  "$defs": {
+    "payer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "id"],
+      "properties": {
+        "type": { "const": "human" },
+        "id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "alg",
+        "key_id",
+        "public_key_base64",
+        "signature_base64"
+      ],
+      "properties": {
+        "alg": { "const": "Ed25519" },
+        "key_id": { "type": "string", "minLength": 1 },
+        "public_key_base64": { "type": "string", "minLength": 1 },
+        "signature_base64": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

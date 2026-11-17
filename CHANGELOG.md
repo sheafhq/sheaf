@@ -2,6 +2,256 @@
 
 All notable changes to Sheaf packages and the recorder Worker.
 
+## 2026-11-17 — Favicon + Reference Simulation (whitepaper)
+
+- Added `src/favicon.svg` (a clump of tall grass: five tapered, swaying
+  blades from one base, back blades dimmer; acid `#c8ff6a` on `#0a0b0d`;
+  deliberately unbound so it doesn't read as fasces) and `GET /favicon.svg`
+  (`image/svg+xml`, 1-day cache). Linked from the landing page, whitepaper and
+  dispute verifier (template + built file). Added an `.svg` Text rule to
+  `wrangler.jsonc` and `assets.d.ts`.
+- Whitepaper §04 Verification: new "Reference Simulation" subsection
+  describing the end-to-end local run (policy-blocked €200 purchase, allowed
+  €100 purchase, offline notary, rejected forgeries).
+- Not yet: the landing "Watch the Machine Economy Run" section waits until the
+  simulation is ported onto `sheaf.policy/1` and pushed to GitHub, so its
+  `npm run sim` command and docs link work for visitors. See `AGENTS.md`.
+- Added `AGENTS.md` / `CLAUDE.md`: shared rules for the multiple agents
+  working on this repo.
+
+## 2026-11-13 — Developer Preview
+
+- Added `PREVIEW_MODE=true` on the Worker. `POST /v1/checkout` returns the
+  static preview message; the x402 paywall remains active.
+- Added the Developer Preview banner to the landing page, receipt page, chain
+  page, and verifier.
+- Documented local Stripe test mode with the Stripe CLI and test cards.
+
+## 2026-11-13 — Automated monetization and viral loops
+
+- Extended x402 paywall to `POST /v1/anchor/local` and
+  `POST /v1/chains/:chain_id/export` at $0.01 USDC on Base.
+- Added x402 payer helpers to `@sheafhq/mcp-recorder` and
+  `@sheafhq/mcp-tools`; added `sheaf_buy_bundle` and `sheaf_anchor_local`
+  MCP tools.
+- Added `POST /v1/checkout` (Stripe Checkout) and
+  `POST /v1/webhooks/stripe` (signed webhook, Pro account + API key + Resend
+  delivery/outbox). Added the landing "Get an API Key" button.
+- Added `/r/:chain_id/:seq` receipt page and the “Verified by Sheaf” footer on
+  receipt and verifier pages.
+- Added `GET /llms.txt` and an LLM-oriented README Quickstart.
+- Stripe/Resend secrets are not present in the deployment; checkout returns a
+  structured `stripe_not_configured` response until they are configured.
+
+## 2026-11-13 — Sheaf-Vault S3 compliance gateway
+
+- New `packages/s3-gateway`: Express proxy on port 8080 accepting
+  `PUT /:bucket/:key`.
+- Streams the request body into SHA-256, forwards to an S3-compatible upstream
+  with the AWS SDK, and submits a `storage.write` / `s3.put` event to Sheaf.
+- Returns `x-sheaf-chain-id`, `x-sheaf-seq`, `x-sheaf-envelope-hash`, and
+  `x-sheaf-file-sha256` on success.
+- If the upstream write succeeds but the receipt fails, returns
+  `502 sheaf_receipt_failed` with `stored: true`.
+- Added package tests with fake S3 and Worker endpoints.
+
+## 2026-11-13 — Sheaf Local sync and Base anchoring
+
+- Added `POST /v1/anchor/local`: verifies a signed local anchor request, anchors
+  the Merkle root on Base L2 with the existing anchorer, and records
+  `(chain_id, merkle_root, tx_hash, block)` in `local_anchors`.
+- Added migration `0004_local_anchors.sql`.
+- `sheaf local sync` now POSTs the signed request and writes `.sheaf/anchor.json`.
+- `sheaf local export` reuses a matching Base anchor and emits
+  `anchor_mode: base`; online verification shows `anchor_on_base ✓`.
+- Offline verification remains integrity-only (`anchor_on_base –`).
+
+## 2026-11-13 — Sheaf Local (offline firewall & ledger)
+
+- `@sheafhq/mcp-recorder wrap --local` runs with zero HTTP: local Ed25519 key,
+  append-only `.sheaf/ledger.jsonl`, local policy enforcement, and blocked
+  events recorded with `result: "blocked"`.
+- `sheaf local export --chain-dir ./.sheaf --case ./case.json --out bundle.sheaf`
+  verifies the local ledger, builds a local Merkle epoch, signs case documents,
+  and emits a standard Dispute Bundle with `anchor.mode: "local"`.
+- `sheaf local sync --chain-dir ./.sheaf` stages an anchor request; the Worker
+  sync endpoint is intentionally not implemented.
+- Added `test:local` and the spawn-based `test:local:e2e`.
+- Docs: “Running Sheaf Locally as a Firewall” in `docs/AUTHORING.md`.
+
+## 2026-11-13 — Whitepaper and explanatory banners
+
+- Landing page adds the “A .sheaf file, or it didn't happen.” manifesto banner
+  and a `/whitepaper` link.
+- Browser verifier adds the zero-dependency trust banner.
+- New `src/whitepaper.html` covers the trust gap, MCP interception, signing,
+  Merkle batching, Base anchoring, selective disclosure, verification, and
+  standards alignment.
+- `GET /whitepaper` added to the Worker; the existing `**/*.html` text-module
+  rule bundles it.
+- Deployed to `https://sheafhq.io`.
+
+## 2026-11-13 — Restore apex landing page
+
+- `sheafhq.io` had no apex DNS record and no Worker custom-domain binding; only
+  `api.sheafhq.io` was attached.
+- Added `sheafhq.io` as a Worker custom domain. Cloudflare provisioned the apex
+  A/AAAA records and certificate.
+- `https://sheafhq.io/` and `https://sheafhq.io/verify` now serve the landing
+  page and verifier. `www.sheafhq.io` still has no DNS record.
+
+## 2026-11-13 — Agent Firewall live demo
+
+- New Base mainnet demo chain `demo-dispute-firewall-20261113t180116z`:
+  policy first, then mandate, delegation, consent, an allowed $129 payment, and
+  a blocked $200 payment attempt (`result: "blocked"`, `verdict: "BLOCK"`).
+- Epoch 11 anchored in Base block `57016675`, tx
+  `0x9862358bd78c6c09ede9550ebb2d159b0f1ad37773eff8735cdb2784a7280575`.
+- Exported `test/fixtures/dispute-walking/bundle-policy.sheaf`; local verify is
+  `VALID (complete)` with `14/14` checks and `policy_enforced: true`.
+- Worker serves `GET /sample-bundle-policy.sheaf`.
+- Browser verifier has **Load Standard Bundle** and **Load Firewall Bundle**.
+- Landing page adds the **Agent Firewall** / **Active Enforcement** bullet.
+- Deployed to `https://api.sheafhq.io`.
+
+## 2026-11-13 — Layer 4: runtime policy enforcement
+
+### @sheafhq/mcp-recorder (0.1.1 → 0.2.0)
+- `sheaf.policy/1` strict schema and pure evaluator.
+- `--policy <path>` enforcement at the MCP boundary.
+- `ALLOW` forwards and records `event.policy`.
+- `BLOCK` stops the call, records `result: "blocked"`, and returns structured
+  JSON-RPC error code `-32001` / `reason_code`.
+- `REQUIRE_APPROVAL` stops the call and returns code `-32002`.
+- Policy commitment is queued as the first event (`kind: "policy"`).
+- `tools/call` `inputs_hash` now hashes `params.arguments` (not the full params).
+
+### @sheafhq/verify (0.4.0 → 0.5.0)
+- `sheaf.policy/1` evaluator/validator.
+- Dispute Bundles may include `policy`; new check `policy_enforced` verifies
+  policy hash, event application, blocked attempts, and payload constraints.
+
+### CLI
+- `sheaf dispute export --policy <path>`.
+
+## 2026-11-13 — Root landing page
+
+- `GET /` now serves a dark-mode HTML landing page with the headline
+  “Verifiable evidence for what an AI agent actually did.”, MCP-boundary/Base
+  explanation, `Test the Live Verifier` CTA, and GitHub link.
+- Machine-readable service manifest moved to `GET /manifest`.
+- Deployed to `https://api.sheafhq.io`.
+
+## 2026-11-13 — Public dispute verifier and sample bundle
+
+### Worker
+- `GET /verify` now serves the single-file Dispute Bundle verifier.
+- `GET /sample-bundle.sheaf` serves the Base-anchored walking-skeleton bundle
+  as a JSON attachment.
+- `wrangler.jsonc` Text module rules for the inlined HTML and `.sheaf` fixture.
+- Deployed to `https://api.sheafhq.io`.
+
+### Browser verifier
+- Added a **Load Sample Bundle** button that fetches `/sample-bundle.sheaf` and
+  verifies it immediately.
+- Default anchor RPC is `https://mainnet.base.org`; `?rpc=` overrides it and
+  `?offline=1` gives integrity-only mode.
+- Live test: `VALID (complete)`, `anchor_confirmed: true`, no evidence gaps.
+
+## 2026-11-13 — Dispute Bundle authoring workflow (C)
+
+### CLI
+- `sheaf dispute init-case <directory>` — scaffolds `case.json`, `documents/`,
+  `payloads/`, and `MAPPING.md`.
+- `sheaf dispute validate --case <case.json> [--archive events.jsonl]` — strict
+  local validation before export, including placeholders, document schemas,
+  Ed25519 key/signature lengths, and optional document/payload hash checks.
+- `--payload <seq>:<kind>=<path>` export flag added.
+
+### Docs
+- `docs/AUTHORING.md` — merchant-facing workflow, RFC 8785 payload hashing,
+  `--payload` usage, and the dedicated-anchorer note.
+
+### Tests
+- End-to-end init-case → fill → validate → export → verify.
+- Document hash mismatch is caught by `validate`.
+- `--payload` flags can supply payloads without a case.json payload list.
+
+## 2026-11-13 — Dispute Bundle build #3 + browser verifier
+
+### Recorder / CLI
+- `src/dispute.ts` — `buildDisputeBundle` for `sheaf.dispute-bundle/1`;
+  `bundle_id` seals every section except itself and `verification`.
+- `src/archive.ts` — local JSONL archive reader for `--archive` (zero Sheaf
+  network).
+- `src/cli.ts` — `sheaf dispute export` / `sheaf dispute verify`, including
+  `--offline`, `--strict`, `--self-check`, `--allow-unconfirmed-anchor`, and
+  testing-only `--trust`.
+- `authorityRef()` helper and `DELEGATION_PARENT_MISMATCH`.
+
+### @sheafhq/verify
+- `verifyDisputeBundle` with 13 named checks, `valid`, `complete`,
+  `anchor_confirmed`, and `evidence_gaps`.
+- Shared `formatDisputeVerification` output used by CLI and browser.
+
+### B
+- `dispute-verify.html` — single-file browser verifier; WebCrypto Ed25519;
+  drag/drop; default offline; `?rpc=` online mode with CORS caveat.
+
+### Tests
+- Local-archive export/verify with zero Sheaf network.
+- `BUNDLE_ID_MISMATCH` for every sealed section.
+- Consent-removed and unsigned-mandate `valid_partial` cases.
+- Real Base mainnet walking skeleton (5 events, tx
+  `0x847c6b718e7ebc0ef0efae87f74f10bf58c14ba668832896244dee2bb3a8271a`).
+- Playwright headless Chromium byte-for-byte parity with the CLI.
+
+## 2026-11-12 — Dispute Bundle build #2: evidence event layer
+
+### Recorder
+- Optional `event.kind`: `tool_call` (default when absent), `mandate`,
+  `delegation`, `consent`. Envelope version stays `arca/1`.
+- `schemas/` — strict versioned JSON Schemas for
+  `sheaf.mandate-document/1`, `sheaf.delegation-document/1`, and
+  `sheaf.consent-document/1`.
+- `src/evidence.ts` — strict document validation, RFC 8785 hash, optional
+  Ed25519 document signature, and `buildEvidenceSubmission()`.
+- The recorder is unchanged; it signs whatever it is given.
+
+### @sheafhq/verify
+- `verifyEvidenceDocument()` — schema/kind match, document hash binding, and
+  optional document signature check.
+- New `EVIDENCE_DOC_HASH_MISMATCH` failure for a document that does not hash to
+  the event's `inputs_hash`.
+
+### Tests
+- Golden pre-change `arca/1` envelope and `sheaf-bundle/1` fixture.
+- Three-schema round-trip, hash-linked mandate/delegation/consent chain, strict
+  validation, and `EVIDENCE_DOC_HASH_MISMATCH`.
+
+## 2026-11-12 — Dispute Bundle build #1: selective disclosure + pinned trust
+
+### Recorder
+- `src/disclose.ts` — `discloseRange` primitive: contiguous window + anchored
+  before/after boundaries, one Merkle inclusion proof per event, multi-epoch
+  support, D1 adapter.
+- No event-schema change and no Worker route yet; this is the primitive only.
+
+### @sheafhq/verify (0.1.2 → 0.2.0)
+- `verifyDisclosures(..., { mode: "dispute" })` — opt-in dispute mode; legacy
+  `verify()` and `sheaf-bundle/1` behavior unchanged.
+- Pinned trust files `trust/recorder-keys.json` and `trust/base-anchorers.json`.
+- Fail-closed `UNKNOWN_RECORDER_KEY`, `RECORDER_KEY_MISMATCH`,
+  `UNKNOWN_ANCHORER`; never fetches `recorder.public_key_url`.
+- Offline mode reports `anchor_tx_on_chain: null`; online mode checks the Base
+  tx through a caller-supplied RPC.
+- CLI: `--dispute`, `--offline`, `--trust <path>`.
+
+### Tests
+- Eight disclosure cases plus cross-epoch, D1-adapter, online-anchor, and
+  fail-closed trust cases.
+- Swapped-key bundle fails with `RECORDER_KEY_MISMATCH`.
+
 ## 2026-11-11 — WP1 custom domain
 
 ### Worker (sheaf-recorder)
