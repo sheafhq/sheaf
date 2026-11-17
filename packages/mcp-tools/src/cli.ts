@@ -22,6 +22,7 @@ const recorderUrls = process.env.SHEAF_RECORDER_URL
 const ctx = {
   recorderUrls,
   baseRpc: process.env.SHEAF_BASE_RPC ?? "https://mainnet.base.org",
+  payerKey: process.env.SHEAF_PAYER_PRIVATE_KEY,
 };
 
 runServer(ctx);

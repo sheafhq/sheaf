@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sheaf Dispute Verifier</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    margin: 0;
+    font: 15px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    background: #f7f5ef;
+    color: #1d1b16;
+  }
+  main { max-width: 980px; margin: 0 auto; padding: 32px 20px 60px; }
+  h1 { font-size: 22px; margin: 0 0 8px; }
+  p { margin: 0 0 16px; max-width: 78ch; }
+  code { background: #e9e4d8; padding: 1px 4px; border-radius: 3px; }
+  #drop {
+    border: 2px dashed #8d846f;
+    border-radius: 10px;
+    padding: 28px 20px;
+    background: #fffdf7;
+    cursor: pointer;
+    text-align: center;
+    margin: 18px 0;
+  }
+  #drop.over { border-color: #2c6e49; background: #eef7f0; }
+  #cors {
+    border-left: 4px solid #9a6700;
+    background: #fff4d6;
+    padding: 10px 12px;
+    margin: 14px 0;
+    white-space: pre-wrap;
+  }
+  #output {
+    background: #14130f;
+    color: #f2ecdd;
+    border-radius: 10px;
+    padding: 18px;
+    overflow: auto;
+    min-height: 280px;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .hint { color: #625b4d; font-size: 13px; }
+  .banner {
+    max-width: 78ch;
+    margin: 0 0 18px;
+    padding: 12px 14px;
+    border-left: 3px solid #8d846f;
+    background: #efece3;
+    color: #4b463c;
+    font-size: 13px;
+    line-height: 1.55;
+  }
+  .topbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 18px 0 8px; }
+  button {
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 11px 14px;
+    border: 1px solid #1d1b16;
+    background: #1d1b16;
+    color: #f7f5ef;
+    cursor: pointer;
+  }
+  button:hover { background: #3a352b; }
+  button[disabled] { opacity: .6; cursor: wait; }
+  .viral {
+    margin-top: 30px;
+    padding-top: 14px;
+    border-top: 1px solid #d8d1c0;
+    font-size: 12px;
+    color: #625b4d;
+  }
+  .viral a { color: #4b463c; text-decoration: none; border-bottom: 1px solid #b8ae98; }
+  .viral a:hover { color: #1d1b16; border-color: #1d1b16; }
+  .preview {
+    margin: 0 0 16px;
+    padding: 9px 12px;
+    border: 1px solid #eadb9a;
+    border-radius: 6px;
+    background: #fff8d6;
+    color: #5e5128;
+    font-size: 12px;
+  }
+  .preview a { color: #5b4bff; }
+</style>
+</head>
+<body>
+<main>
+  <div class="preview">Sheaf is currently in Developer Preview. All paid features are free until further notice. <a href="https://news.ycombinator.com/submit" target="_blank" rel="noopener">Join the Hacker News discussion.</a></div>
+  <h1>Sheaf Dispute Verifier</h1>
+  <div class="banner">
+    You are running a zero-dependency verifier. The file you dropped into this
+    page contains a hash-chained receipt anchored to the Base L2 blockchain.
+    This page verifies the Ed25519 signatures and Merkle proofs locally in your
+    browser. If the checks below pass, the record has not been altered since
+    the moment of execution, and you do not need to trust Sheaf's servers to
+    confirm it.
+  </div>
+  <p>
+    Drop a <code>.sheaf</code> Dispute Bundle below. Verification runs in this
+    page with the pinned recorder key and anchorer shipped in the verifier.
+    No Sheaf server is contacted.
+  </p>
+  <p class="hint">
+    Anchor confirmation defaults to <code>https://mainnet.base.org</code>.
+    Add <code>?rpc=&lt;url&gt;</code> to override it, or
+    <code>?offline=1</code> for integrity-only.
+  </p>
+  <div class="topbar">
+    <button id="load-sample" type="button">Load Standard Bundle</button>
+    <button id="load-firewall" type="button">Load Firewall Bundle</button>
+    <span class="hint">No file? Verify a Base-anchored walking skeleton.</span>
+  </div>
+  <div id="cors"></div>
+  <div id="drop" tabindex="0" role="button" aria-label="Drop a .sheaf bundle">
+    Drop a .sheaf bundle here, or click to choose a file
+  </div>
+  <input id="file" type="file" accept=".sheaf,application/json" hidden>
+  <pre id="output">No bundle loaded.</pre>
+  <div class="viral">
+    <a href="https://sheafhq.io/">Verified by Sheaf. Cryptographic evidence for AI agents.</a>
+  </div>
+</main>
+<script>/*__VERIFIER_JS__*/</script>
+<script>
+(function () {
+  "use strict";
+  var output = document.getElementById("output");
+  var drop = document.getElementById("drop");
+  var input = document.getElementById("file");
+  var cors = document.getElementById("cors");
+  var loadSampleButton = document.getElementById("load-sample");
+  var loadFirewallButton = document.getElementById("load-firewall");
+  var params = new URLSearchParams(window.location.search);
+  var DEFAULT_RPC = "https://mainnet.base.org";
+  var offline = params.get("offline") === "1" || params.get("rpc") === "offline";
+  var rpc = offline ? null : (params.get("rpc") || DEFAULT_RPC);
+  var SheafDispute = window.SheafDispute;
+
+  cors.textContent = offline
+    ? "Integrity-only mode: anchor confirmation is disabled. " +
+      "Remove ?offline=1 to confirm the Base anchor."
+    : "Anchor confirmation RPC: " + rpc + "\n" +
+      "CORS caveat: if this RPC is blocked by cross-origin policy, pass a " +
+      "CORS-enabled ?rpc=<url> or use ?offline=1. No Sheaf server is contacted " +
+      "during verification.";
+
+  function show(message) {
+    output.textContent = message;
+  }
+
+  async function runVerify(bundle) {
+    try {
+      var result = await SheafDispute.verifyDisputeBundle(
+        bundle,
+        rpc ? { base_rpc: rpc } : {}
+      );
+      show(SheafDispute.formatDisputeVerification(result));
+    } catch (err) {
+      show("NOT VALID\ncode: VERIFIER_ERROR\nreason: " + String(err));
+    }
+  }
+
+  async function loadBundle(remoteUrl, localUrl, button) {
+    button.disabled = true;
+    show("Loading bundle…");
+    try {
+      var url = window.location.protocol === "file:" ? localUrl : remoteUrl;
+      var response = await fetch(url);
+      if (!response.ok) throw new Error("HTTP " + response.status);
+      var bundle = await response.json();
+      await runVerify(bundle);
+    } catch (err) {
+      show("NOT VALID\ncode: BUNDLE_LOAD_FAILED\nreason: " + String(err));
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function handleFile(file) {
+    if (!file) return;
+    var text;
+    try {
+      text = await file.text();
+    } catch (err) {
+      show("NOT VALID\ncode: FILE_READ_ERROR\nreason: " + String(err));
+      return;
+    }
+    var bundle;
+    try {
+      bundle = JSON.parse(text);
+    } catch (err) {
+      show("NOT VALID\ncode: INVALID_JSON\nreason: " + String(err));
+      return;
+    }
+    await runVerify(bundle);
+  }
+
+  loadSampleButton.addEventListener("click", function () {
+    void loadBundle(
+      "/sample-bundle.sheaf",
+      "./test/fixtures/dispute-walking/bundle.sheaf",
+      loadSampleButton,
+    );
+  });
+  loadFirewallButton.addEventListener("click", function () {
+    void loadBundle(
+      "/sample-bundle-policy.sheaf",
+      "./test/fixtures/dispute-walking/bundle-policy.sheaf",
+      loadFirewallButton,
+    );
+  });
+  drop.addEventListener("click", function () { input.click(); });
+  drop.addEventListener("keydown", function (event) {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      input.click();
+    }
+  });
+  drop.addEventListener("dragover", function (event) {
+    event.preventDefault();
+    drop.classList.add("over");
+  });
+  drop.addEventListener("dragleave", function () {
+    drop.classList.remove("over");
+  });
+  drop.addEventListener("drop", function (event) {
+    event.preventDefault();
+    drop.classList.remove("over");
+    var file = event.dataTransfer && event.dataTransfer.files
+      ? event.dataTransfer.files[0]
+      : null;
+    void handleFile(file);
+  });
+  input.addEventListener("change", function () {
+    var file = input.files && input.files[0] ? input.files[0] : null;
+    void handleFile(file);
+  });
+})();
+</script>
+</body>
+</html>

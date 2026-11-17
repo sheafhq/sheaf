@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sheaf — Verifiable agent execution</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<style>
+:root{--bg:#0a0b0d;--line:#242830;--text:#ecebe4;--muted:#8d9098;--acid:#c8ff6a;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;--sans:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;display:grid;place-items:center;background:linear-gradient(rgba(255,255,255,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.025) 1px,transparent 1px),var(--bg);background-size:48px 48px;color:var(--text);font:16px/1.6 var(--sans);-webkit-font-smoothing:antialiased}
+main{width:min(920px,100%);padding:56px 28px}
+.preview{margin:0 0 26px;padding:11px 14px;border:1px solid #3b3d2a;border-left:2px solid var(--acid);background:rgba(200,255,106,.05);color:#c5c3ba;font:12px/1.6 var(--mono)}
+.preview a{color:var(--acid)}
+.eyebrow{font:11px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--acid)}
+h1{margin:20px 0 18px;font-size:clamp(42px,7vw,82px);line-height:.98;letter-spacing:-.05em;font-weight:650;max-width:880px}
+p{margin:0 0 30px;max-width:680px;color:#c5c3ba;font-size:19px}
+p strong{color:var(--text);font-weight:600}
+.actions{display:flex;flex-wrap:wrap;align-items:center;gap:20px}
+.button{display:inline-flex;align-items:center;justify-content:center;min-height:64px;padding:0 30px;background:var(--acid);color:#0a0b0d;text-decoration:none;font:700 15px/1 var(--mono);letter-spacing:.04em;text-transform:uppercase;border:1px solid var(--acid);cursor:pointer}
+.button:hover{background:#dcff9a;border-color:#dcff9a}
+.manifesto{margin:0 0 28px;max-width:760px;padding:22px 24px;border:1px solid var(--line);border-left:2px solid var(--acid);background:rgba(255,255,255,.025)}
+.manifesto h2{margin:0 0 10px;font-size:24px;line-height:1.15;letter-spacing:-.03em;font-weight:600}
+.manifesto p{margin:0 0 14px;color:#b9b7ae;font-size:15px;line-height:1.65}
+.manifesto a{color:var(--acid);font:600 12px/1.4 var(--mono);letter-spacing:.03em;text-decoration:none;border-bottom:1px solid rgba(200,255,106,.35)}
+.manifesto a:hover{border-color:var(--acid)}
+.firewall{margin:0 0 30px;max-width:680px;border-left:2px solid var(--acid);padding:14px 16px;background:rgba(200,255,106,.04)}
+.firewall-title{font:10px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--acid);margin-bottom:8px}
+.firewall ul{margin:0;padding-left:18px;color:#c5c3ba;font-size:15px}
+.firewall li::marker{color:var(--acid)}
+.secondary{color:var(--muted);font:12px/1.4 var(--mono);letter-spacing:.04em;text-decoration:none;border-bottom:1px solid var(--line)}
+.secondary:hover{color:var(--text);border-color:var(--muted)}
+.meta{margin-top:42px;color:var(--muted);font:11px/1.5 var(--mono);letter-spacing:.04em}
+@media(max-width:640px){main{padding:40px 22px}h1{font-size:clamp(36px,11vw,56px)}p{font-size:17px}.button{width:100%}}
+</style>
+</head>
+<body>
+<main>
+  <div class="preview">Sheaf is currently in Developer Preview. All paid features are free until further notice. <a href="https://news.ycombinator.com/submit" target="_blank" rel="noopener">Join the Hacker News discussion.</a></div>
+  <div class="eyebrow">SHEAF / EXECUTION RECORDER</div>
+  <h1>Verifiable evidence for what an AI agent actually did.</h1>
+  <p>
+    Sheaf intercepts <strong>MCP tool calls at the boundary</strong>, signs every
+    event outside the agent process, hash-chains the record, and anchors Merkle
+    roots on <strong>Base L2</strong>. The resulting receipt verifies offline —
+    no Sheaf server required.
+  </p>
+  <section class="manifesto">
+    <h2>A .sheaf file, or it didn't happen.</h2>
+    <p>In a perfect world, you could trust the receipt you get from a vendor or service provider. You wouldn't need to worry about edited logs, mutable databases, or changing model versions. But AI agents act at machine speed, and application logs are designed for debugging, not for legal disputes. Sheaf provides portable, cryptographically verifiable proof of what an agent saw and did. No trust required.</p>
+    <a href="/whitepaper">Read the Technical Whitepaper →</a>
+  </section>
+  <div class="firewall">
+    <div class="firewall-title">Agent Firewall</div>
+    <ul>
+      <li><strong>Active Enforcement:</strong> Block unauthorized tool calls at the proxy level and record the violation with cryptographic proof.</li>
+    </ul>
+  </div>
+  <div class="actions">
+    <a class="button" href="/verify">Test the Live Verifier</a>
+    <button class="button" id="get-key" type="button">Get an API Key</button>
+    <a class="secondary" href="https://github.com/sheafhq/sheaf">View the GitHub Repo ↗</a>
+  </div>
+  <p class="meta">Ed25519 · RFC 8785 · Merkle epochs · Base L2 · MIT</p>
+</main>
+<script>
+  document.getElementById("get-key").addEventListener("click", async function () {
+    var button = this;
+    button.disabled = true;
+    button.textContent = "Opening checkout…";
+    try {
+      var response = await fetch("/v1/checkout", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      });
+      var body = await response.json();
+      if (body.status === "preview") {
+        alert(body.message);
+        return;
+      }
+      if (body.checkout_url) {
+        window.location.href = body.checkout_url;
+        return;
+      }
+      alert(body.error === "stripe_not_configured"
+        ? "Checkout is not configured yet. Set STRIPE_SECRET_KEY and STRIPE_PRICE_ID."
+        : body.message || body.error || "Checkout is unavailable.");
+    } catch (err) {
+      alert("Checkout is unavailable.");
+    } finally {
+      button.disabled = false;
+      button.textContent = "Get an API Key";
+    }
+  });
+</script>
+</body>
+</html>

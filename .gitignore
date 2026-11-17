@@ -1,7 +1,14 @@
 node_modules/
 .wrangler/
 .dev.vars
+.env
 .npmrc
 dist/
+dist-cli/
+.test-dist/
+.chrome-profile/
 *.log
 .DS_Store
+
+# test temp dirs (may hold local ledger keys)
+test/tmp-*/

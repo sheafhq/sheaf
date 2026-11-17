@@ -11,7 +11,7 @@ Derived from the convergent academic and IETF work on agent auditability:
 3. **Merkle batching + compact inclusion proofs.** Events are rolled into epochs; only the 32-byte Merkle root is anchored on-chain. Inclusion proofs are O(log n) in epoch size. No event content touches the chain. (Agent Flight Recorder)
 4. **Canonical serialization (RFC 8785 JCS).** The same event serializes to identical bytes across OS and architecture. Signatures verify portably. (GuardClaw)
 5. **Content-optional, privacy-first.** Events carry metadata + hashes + content-addressed references, not raw payloads. Explicit redaction support. (NHE)
-6. **Semantic event fields.** Eight fields per event: intent, actor, authority, tool, inputs_hash, outputs_hash, result, timestamp. Forensic queries are precise. (AFR)
+6. **Semantic event fields.** Eight semantic fields per event — intent, actor, authority, tool, inputs_hash, outputs_hash, result, timestamp — plus an optional `kind` discriminator for control events. Forensic queries are precise. (AFR)
 7. **Agent-native interception at MCP.** The capture point is the tool-call boundary. Any MCP client/server pair can be instrumented transparently. (mcp-audit-otel, mcp-audit-proxy, GuardClaw)
 8. **Open verification.** Verifier is a library anyone can run offline against the public key + Base RPC. No dependency on Sheaf's servers to check a receipt.
 
@@ -21,13 +21,15 @@ Derived from the convergent academic and IETF work on agent auditability:
 {
   "v": "arca/1",
   "event": {
+    "kind": "optional — tool_call | mandate | delegation | consent | policy; absent means tool_call",
     "intent": "string — what the agent was trying to do",
     "actor": "string — agent identifier",
     "authority": "string | null — grant / role / session under which the call was made",
     "tool": "string — MCP tool name (e.g. mcp://filesystem/write)",
     "inputs_hash": "sha256:hex — hash of canonicalized tool arguments",
     "outputs_hash": "sha256:hex | null — hash of tool response (null if call errored)",
-    "result": "ok | error | timeout | cancelled",
+    "result": "ok | error | timeout | cancelled | blocked",
+    "policy": "optional — { schema: 'sheaf.policy/1', hash, verdict, reason_code }",
     "ts": "iso8601 — UTC timestamp at event capture"
   },
   "chain": {
@@ -41,6 +43,13 @@ Derived from the convergent academic and IETF work on agent auditability:
   }
 }
 ```
+
+`kind` is additive and optional. An `arca/1` envelope without it is a
+`tool_call`; the version stays `arca/1`, and pre-change envelopes hash and verify
+unchanged. Control-event documents are versioned separately
+(`sheaf.mandate-document/1`, `sheaf.delegation-document/1`,
+`sheaf.consent-document/1`) and are bound to the event by
+`sha256(JCS(document without document_signature)) == event.inputs_hash`.
 
 ### Canonicalization
 

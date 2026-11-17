@@ -1,8 +1,26 @@
 // Sheaf event envelope types — see ARCHITECTURE.md.
 
-export type EventResult = "ok" | "error" | "timeout" | "cancelled";
+export type EventResult = "ok" | "error" | "timeout" | "cancelled" | "blocked";
+
+/** Optional control-event discriminator. Absent means "tool_call" so every
+ *  pre-change arca/1 event keeps its original meaning and hash. */
+export type EventKind =
+  | "tool_call"
+  | "mandate"
+  | "delegation"
+  | "consent"
+  | "policy";
+
+export type EventPolicy = {
+  schema: "sheaf.policy/1";
+  hash: string;
+  verdict: "ALLOW" | "BLOCK" | "REQUIRE_APPROVAL";
+  reason_code: string;
+};
 
 export type EventBody = {
+  kind?: EventKind;
+  policy?: EventPolicy;
   intent: string;
   actor: string;
   authority: string | null;

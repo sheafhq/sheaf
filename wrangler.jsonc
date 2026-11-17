@@ -2,6 +2,12 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "sheaf-recorder",
   "main": "src/index.ts",
+  "rules": [
+    { "type": "Text", "globs": ["**/*.html"], "fallthrough": true },
+    { "type": "Text", "globs": ["**/*.sheaf"], "fallthrough": true },
+    { "type": "Text", "globs": ["**/*.txt"], "fallthrough": true },
+    { "type": "Text", "globs": ["**/*.svg"], "fallthrough": true }
+  ],
   "compatibility_date": "2026-11-01",
   "compatibility_flags": ["nodejs_compat"],
   "observability": {
@@ -17,7 +23,10 @@
     // as goldencalf; linkable under @gcalf public identity.
     "PAYOUT_ADDRESS": "0xE5126f9Cf0fab2B709D932b2516Ade946ebD9629",
     "NETWORK": "eip155:8453",
-    "FACILITATOR_URL": "https://api.cdp.coinbase.com/platform/v2/x402"
+    "FACILITATOR_URL": "https://api.cdp.coinbase.com/platform/v2/x402",
+    // Developer Preview: checkout is a static bypass while the legal entity
+    // is pending. The x402 paywall remains active for agents.
+    "PREVIEW_MODE": "true"
   },
   // Custom domain (WP1). Cloudflare auto-provisions the DNS record when
   // this route is deployed, since the zone and Worker share one CF account.
@@ -26,7 +35,9 @@
   // every client still pointed at the old URL.
   "workers_dev": true,
   "routes": [
-    { "pattern": "api.sheafhq.io", "custom_domain": true }
+    { "pattern": "api.sheafhq.io", "custom_domain": true },
+    // The marketing landing page lives at the zone apex.
+    { "pattern": "sheafhq.io", "custom_domain": true }
   ],
   "analytics_engine_datasets": [
     { "binding": "ANALYTICS", "dataset": "sheaf_recorder" }

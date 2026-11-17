@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sheafhq.io/schemas/sheaf.mandate-document/1",
+  "title": "Sheaf mandate document v1",
+  "description": "What an agent was authorized to do. The document hash is sha256(JCS(this document without document_signature)); that hash is the event's inputs_hash.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "mandate_id",
+    "principal",
+    "agent",
+    "scope",
+    "issued_at",
+    "expires_at",
+    "nonce"
+  ],
+  "properties": {
+    "schema": { "const": "sheaf.mandate-document/1" },
+    "mandate_id": { "type": "string", "minLength": 1 },
+    "principal": { "$ref": "#/$defs/party" },
+    "agent": { "$ref": "#/$defs/agent" },
+    "scope": { "$ref": "#/$defs/scope" },
+    "issued_at": { "type": "string", "format": "date-time" },
+    "expires_at": { "type": "string", "format": "date-time" },
+    "nonce": { "type": "string", "minLength": 1 },
+    "document_signature": { "$ref": "#/$defs/signature" }
+  },
+  "$defs": {
+    "party": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "id", "display_name"],
+      "properties": {
+        "type": { "enum": ["human", "policy"] },
+        "id": { "type": "string", "minLength": 1 },
+        "display_name": { "type": "string", "minLength": 1 }
+      }
+    },
+    "agent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "id", "display_name"],
+      "properties": {
+        "type": { "const": "agent" },
+        "id": { "type": "string", "minLength": 1 },
+        "display_name": { "type": "string", "minLength": 1 }
+      }
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "merchant",
+        "tools",
+        "amount_max_minor",
+        "currency",
+        "valid_from",
+        "valid_until"
+      ],
+      "properties": {
+        "merchant": { "type": "string", "minLength": 1 },
+        "tools": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "amount_max_minor": { "type": "integer", "minimum": 0 },
+        "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+        "valid_from": { "type": "string", "format": "date-time" },
+        "valid_until": { "type": "string", "format": "date-time" }
+      }
+    },
+    "signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "alg",
+        "key_id",
+        "public_key_base64",
+        "signature_base64"
+      ],
+      "properties": {
+        "alg": { "const": "Ed25519" },
+        "key_id": { "type": "string", "minLength": 1 },
+        "public_key_base64": { "type": "string", "minLength": 1 },
+        "signature_base64": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

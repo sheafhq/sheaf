@@ -1,0 +1,31 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM"],
+    "types": ["node"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "isolatedModules": true,
+    "noEmit": false,
+    "outDir": "dist-cli",
+    "rootDir": "src"
+  },
+  "include": [
+    "src/archive.ts",
+    "src/authoring.ts",
+    "src/cli.ts",
+    "src/disclose.ts",
+    "src/dispute.ts",
+    "src/evidence.ts",
+    "src/local.ts",
+    "src/x402-payer.ts",
+    "src/canonical.ts",
+    "src/merkle.ts",
+    "src/types.ts"
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "schema": "sheaf.consent-document/1",
+  "consent_id": "consent_demo_001",
+  "payer": {
+    "type": "human",
+    "id": "payer_demo_001"
+  },
+  "agent_id": "agent://shopper-7",
+  "mandate_id": "mnd_demo_001",
+  "merchant": "northwind-outfitters.example",
+  "amount_minor": 12900,
+  "currency": "USD",
+  "consented_at": "2026-11-10T16:41:50Z",
+  "method": "payer_signature",
+  "session_id": "sess_demo_001",
+  "document_signature": {
+    "alg": "Ed25519",
+    "key_id": "demo-principal-1",
+    "public_key_base64": "iiGhq6fcufeukdM6ceCzJi0jsEl+w1DbblRyqMErRDI=",
+    "signature_base64": "r/CqMM43W1neHNkEL/FCqA0HwYCoFquK8w0OyFrNB9+5sh+oJLF8rofnyohfxkRhxIjFSdVpv5aomvEM70ESCA=="
+  }
+}

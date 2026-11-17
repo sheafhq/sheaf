@@ -158,9 +158,16 @@ th { font-size: 11px; text-transform: uppercase; color: var(--muted); font-weigh
 .empty { text-align: center; padding: 48px 20px; color: var(--muted); }
 footer { margin-top: 48px; color: var(--muted); font-size: 13px; text-align: center; }
 footer a { color: var(--muted); }
+.preview {
+  background: #fff8d6; border: 1px solid #eadb9a; border-radius: 8px;
+  padding: 10px 12px; margin: 0 0 20px; font-size: 13px; color: #5e5128;
+}
+.preview a { color: #5b4bff; }
 </style>
 </head>
 <body>
+
+<div class="preview">Sheaf is currently in Developer Preview. All paid features are free until further notice. <a href="https://news.ycombinator.com/submit" target="_blank" rel="noopener">Join the Hacker News discussion.</a></div>
 
 <h1>${escapeHtml(s.chain_id)}</h1>
 <p class="subtitle">Sheaf chain · anchored on <a href="https://basescan.org/" target="_blank" rel="noopener">Base mainnet</a></p>

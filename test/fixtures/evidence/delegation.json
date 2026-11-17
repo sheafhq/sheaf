@@ -1,0 +1,23 @@
+{
+  "schema": "sheaf.delegation-document/1",
+  "delegation_id": "dlg_demo_001",
+  "issuer": {
+    "type": "human",
+    "id": "payer_demo_001"
+  },
+  "subject": {
+    "type": "agent",
+    "id": "agent://shopper-7"
+  },
+  "parent_id": "mnd_demo_001",
+  "scope": {
+    "merchant": "northwind-outfitters.example",
+    "tools": ["mcp://shop/payment"],
+    "amount_max_minor": 15000,
+    "currency": "USD",
+    "valid_from": "2026-11-10T16:30:00Z",
+    "valid_until": "2026-11-11T16:30:00Z"
+  },
+  "issued_at": "2026-11-10T16:31:00Z",
+  "expires_at": "2026-11-11T16:30:00Z"
+}

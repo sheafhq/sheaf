@@ -4,13 +4,31 @@ import { HTTPFacilitatorClient } from "@x402/core/server";
 import { ExactEvmScheme } from "@x402/evm/exact/server";
 import { declareDiscoveryExtension } from "@x402/extensions/bazaar";
 import { envelopeHash, signingInput } from "./chain.js";
-import { importRecorderKey, b64encode, signEd25519 } from "./crypto.js";
+import { canonicalize } from "./canonical.js";
+import {
+  importRecorderKey,
+  b64encode,
+  signEd25519,
+  verifyEd25519,
+} from "./crypto.js";
 import { ACTIVE_KEY_ID, KEY_RING, activeKey } from "./keys.js";
 import { buildMerkleTree, inclusionProof, EMPTY_ROOT } from "./merkle.js";
 import { anchorRoot } from "./anchor.js";
 import { buildBundle, BUNDLE_VERSION } from "./bundle.js";
+import {
+  createCheckoutSession,
+  sendResendEmail,
+  verifyStripeSignature,
+} from "./billing.js";
 import { buildCreateAuthHeaders, extractPayer } from "./x402.js";
-import { VERIFY_HTML } from "./verify-page.js";
+import { renderReceiptPage } from "./receipt-page.js";
+import DISPUTE_VERIFY_HTML from "../dispute-verify.html";
+import SAMPLE_BUNDLE from "../test/fixtures/dispute-walking/bundle.sheaf";
+import FIREWALL_BUNDLE from "../test/fixtures/dispute-walking/bundle-policy.sheaf";
+import LANDING_HTML from "./landing.html";
+import WHITEPAPER_HTML from "./whitepaper.html";
+import FAVICON_SVG from "./favicon.svg";
+import LLMS_TXT from "../llms.txt";
 import {
   anchorLimitForPlan,
   createAccount,
@@ -48,6 +66,12 @@ type Env = {
   FACILITATOR_URL: string;
   CDP_API_KEY_NAME?: string;
   CDP_API_KEY_SECRET?: string;
+  STRIPE_SECRET_KEY?: string;
+  STRIPE_PRICE_ID?: string;
+  STRIPE_WEBHOOK_SECRET?: string;
+  RESEND_API_KEY?: string;
+  RESEND_FROM?: string;
+  PREVIEW_MODE?: string;
   ANALYTICS?: {
     writeDataPoint(event: {
       blobs?: string[];
@@ -99,7 +123,223 @@ app.use(async (c, next) => {
   } catch {}
 });
 
+// Heavy endpoints are paid before their handlers run. The paywall is
+// registered early because Hono executes middleware in registration order.
+app.use(async (c, next) => {
+  const path = c.req.path;
+  if (
+    path === "/v1/anchor/local" ||
+    /^\/v1\/chains\/[^/]+\/export$/.test(path)
+  ) {
+    return getPaymentMiddleware(c.env)(c, next);
+  }
+  return next();
+});
+
+function localRoot(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const clean = value
+    .trim()
+    .replace(/^sha256:/i, "")
+    .replace(/^0x/i, "")
+    .toLowerCase();
+  return /^[0-9a-f]{64}$/.test(clean) ? clean : null;
+}
+
+// Local-mode sync: the user's machine sends only the Merkle root, event count,
+// and local public key. The request must be signed by that key. The Worker
+// anchors the root on Base and stores the public receipt.
+app.post("/v1/anchor/local", async (c) => {
+  if (!c.env.DB) return c.json({ error: "DB binding missing" }, 500);
+  if (!c.env.ANCHORER_PRIVATE_KEY)
+    return c.json({ error: "ANCHORER_PRIVATE_KEY secret missing" }, 500);
+
+  let body: Record<string, unknown>;
+  try {
+    body = (await c.req.json()) as Record<string, unknown>;
+  } catch {
+    return c.json({ error: "invalid JSON body" }, 400);
+  }
+  if (!body || typeof body !== "object")
+    return c.json({ error: "object body required" }, 400);
+
+  const chainId = body.chain_id;
+  if (
+    typeof chainId !== "string" ||
+    chainId.length === 0 ||
+    chainId.length > 200 ||
+    !/^[A-Za-z0-9._:-]+$/.test(chainId)
+  ) {
+    return c.json({ error: "invalid chain_id" }, 400);
+  }
+  const root = localRoot(body.merkle_root);
+  if (!root) return c.json({ error: "invalid merkle_root" }, 400);
+  const eventCount = body.event_count;
+  if (
+    !Number.isInteger(eventCount) ||
+    (eventCount as number) < 1 ||
+    (eventCount as number) > 100_000
+  ) {
+    return c.json({ error: "invalid event_count" }, 400);
+  }
+  const publicKey =
+    (typeof body.recorder_public_key_base64 === "string"
+      ? body.recorder_public_key_base64
+      : typeof body.public_key === "string"
+        ? body.public_key
+        : null) ?? null;
+  if (!publicKey) return c.json({ error: "public_key required" }, 400);
+  let publicBytes: Uint8Array;
+  try {
+    publicBytes = Uint8Array.from(atob(publicKey), (ch) => ch.charCodeAt(0));
+  } catch {
+    return c.json({ error: "invalid public_key" }, 400);
+  }
+  if (publicBytes.length !== 32)
+    return c.json({ error: "public_key must be 32 bytes" }, 400);
+
+  const signature =
+    typeof body.signature_base64 === "string" ? body.signature_base64 : null;
+  if (!signature)
+    return c.json({ error: "signature_base64 required" }, 401);
+  const unsigned = { ...body };
+  delete unsigned.signature_base64;
+  const signatureOk = await verifyEd25519(
+    publicKey,
+    new TextEncoder().encode(canonicalize(unsigned)),
+    signature,
+  );
+  if (!signatureOk)
+    return c.json({ error: "invalid anchor-request signature" }, 401);
+
+  const existing = await c.env.DB.prepare(
+    `SELECT epoch_id, chain_id, merkle_root, event_count, anchor_tx_hash,
+            anchor_block, anchor_confirmed_at
+     FROM local_anchors
+     WHERE chain_id = ? AND merkle_root = ?`,
+  )
+    .bind(chainId, root)
+    .first();
+  if (existing) {
+    return c.json({
+      ok: true,
+      idempotent: true,
+      chain_id: existing.chain_id,
+      merkle_root: existing.merkle_root,
+      event_count: existing.event_count,
+      epoch_id: existing.epoch_id,
+      tx_hash: existing.anchor_tx_hash,
+      block_number: existing.anchor_block,
+      anchorer: c.env.ANCHORER_ADDRESS ?? null,
+      explorer: `https://basescan.org/tx/${String(existing.anchor_tx_hash)}`,
+    });
+  }
+
+  const [epochRow, localRow] = await Promise.all([
+    c.env.DB.prepare(
+      "SELECT COALESCE(MAX(epoch_id), -1) AS max_id FROM epochs",
+    )
+      .bind()
+      .first(),
+    c.env.DB.prepare(
+      "SELECT COALESCE(MAX(epoch_id), -1) AS max_id FROM local_anchors",
+    )
+      .bind()
+      .first(),
+  ]);
+  const epochId =
+    Math.max(
+      Number(epochRow?.max_id ?? -1),
+      Number(localRow?.max_id ?? -1),
+    ) + 1;
+
+  let anchored: Awaited<ReturnType<typeof anchorRoot>>;
+  try {
+    anchored = await anchorRoot(
+      c.env.ANCHORER_PRIVATE_KEY,
+      epochId,
+      root,
+      c.env.BASE_RPC_URL,
+      true,
+    );
+  } catch (err) {
+    return c.json(
+      { error: `anchor tx failed: ${(err as Error).message}`, epoch_id: epochId },
+      502,
+    );
+  }
+
+  const nowSec = Math.floor(Date.now() / 1000);
+  const blockNumber = anchored.block_number ?? null;
+  await c.env.DB.prepare(
+    `INSERT INTO local_anchors
+      (epoch_id, chain_id, merkle_root, event_count, public_key_base64,
+       anchor_tx_hash, anchor_block, anchor_submitted_at, anchor_confirmed_at,
+       created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  )
+    .bind(
+      epochId,
+      chainId,
+      root,
+      eventCount,
+      publicKey,
+      anchored.tx_hash,
+      blockNumber,
+      nowSec,
+      blockNumber === null ? null : nowSec,
+      nowSec,
+    )
+    .run();
+
+  return c.json(
+    {
+      ok: true,
+      idempotent: false,
+      chain_id: chainId,
+      merkle_root: root,
+      event_count: eventCount,
+      epoch_id: epochId,
+      tx_hash: anchored.tx_hash,
+      block_number: blockNumber,
+      anchorer: anchored.from,
+      calldata: anchored.calldata,
+      network: c.env.ANCHOR_NETWORK,
+      explorer: `https://basescan.org/tx/${anchored.tx_hash}`,
+    },
+    201,
+  );
+});
+
 app.get("/", (c) => {
+  c.header("Content-Type", "text/html; charset=utf-8");
+  c.header("Cache-Control", "public, max-age=300, s-maxage=300");
+  return c.body(LANDING_HTML);
+});
+
+app.get("/whitepaper", (c) => {
+  c.header("Content-Type", "text/html; charset=utf-8");
+  c.header("Cache-Control", "public, max-age=300, s-maxage=300");
+  return c.body(WHITEPAPER_HTML);
+});
+
+// Site icon, referenced by <link rel="icon"> on the landing page, whitepaper
+// and verifier. One day of caching: browsers re-check favicons rarely anyway.
+app.get("/favicon.svg", (c) => {
+  c.header("Content-Type", "image/svg+xml");
+  c.header("Cache-Control", "public, max-age=86400, s-maxage=86400");
+  return c.body(FAVICON_SVG);
+});
+
+app.get("/llms.txt", (c) => {
+  c.header("Content-Type", "text/plain; charset=utf-8");
+  c.header("Cache-Control", "public, max-age=300, s-maxage=300");
+  return c.body(LLMS_TXT);
+});
+
+// Machine-readable service manifest, kept at /manifest so the landing page can
+// own / without breaking agent discovery.
+app.get("/manifest", (c) => {
   const origin = new URL(c.req.url).origin;
   return c.json({
     service: "sheaf",
@@ -121,11 +361,17 @@ app.get("/", (c) => {
     endpoints: {
       free: [
         { pattern: "POST /events", example: `${origin}/events`, note: "submit a signed envelope; recorder co-signs and chains it" },
+        { pattern: "POST /v1/anchor/local", example: `${origin}/v1/anchor/local`, note: "anchor a signed local Merkle root on Base; stores local_anchors receipt" },
         { pattern: "GET /events/{chain_id}/{seq}", example: `${origin}/events/smoke-test-1/0`, note: "fetch stored envelope" },
         { pattern: "GET /chains/{chain_id}/head", example: `${origin}/chains/smoke-test-1/head`, note: "current head of a chain" },
         { pattern: "GET /epoch/{epoch_id}/proof/{chain_id}/{seq}", example: `${origin}/epoch/0/proof/smoke-test-1/0`, note: "Merkle inclusion proof" },
         { pattern: "GET /.well-known/sheaf-public-key", example: `${origin}/.well-known/sheaf-public-key`, note: "issuer public keys" },
-        { pattern: "GET /verify", example: `${origin}/verify`, note: "browser drag-drop verifier (HTML page)" },
+        { pattern: "GET /whitepaper", example: `${origin}/whitepaper`, note: "technical whitepaper (HTML)" },
+        { pattern: "GET /llms.txt", example: `${origin}/llms.txt`, note: "LLM-optimized install and usage guide" },
+        { pattern: "POST /v1/checkout", example: `${origin}/v1/checkout`, note: "Stripe Checkout for Sheaf Pro" },
+        { pattern: "GET /verify", example: `${origin}/verify`, note: "single-file Dispute Bundle verifier (HTML; no Sheaf server during verification)" },
+        { pattern: "GET /sample-bundle.sheaf", example: `${origin}/sample-bundle.sheaf`, note: "Base-anchored walking-skeleton sample bundle" },
+        { pattern: "GET /sample-bundle-policy.sheaf", example: `${origin}/sample-bundle-policy.sheaf`, note: "Agent Firewall sample bundle (policy, allowed + blocked calls)" },
         { pattern: "GET /c/{chain_id}", example: `${origin}/c/smoke-test-1`, note: "public verification page for one chain" },
       ],
       paid: [
@@ -147,13 +393,35 @@ app.get("/", (c) => {
   });
 });
 
-// Browser-based drag-drop verifier. Pure static HTML; verification runs
-// client-side against a public Base RPC + the recorder public key embedded
-// in the bundle. One shareable URL for the "try verifying my receipt" moment.
+// Public Dispute Bundle verifier. Single-file HTML with the verifier inlined;
+// no Sheaf server is contacted during verification (only the caller's RPC).
 app.get("/verify", (c) => {
   c.header("Content-Type", "text/html; charset=utf-8");
-  c.header("Cache-Control", "public, max-age=3600, s-maxage=3600");
-  return c.body(VERIFY_HTML);
+  c.header("Cache-Control", "public, max-age=300, s-maxage=300");
+  return c.body(DISPUTE_VERIFY_HTML);
+});
+
+// Public walking-skeleton artifact for first-time verification. Served as a
+// download and also fetchable by the verifier's "Load Sample Bundle" button.
+app.get("/sample-bundle.sheaf", (c) => {
+  c.header("Content-Type", "application/json; charset=utf-8");
+  c.header(
+    "Content-Disposition",
+    'attachment; filename="sample-bundle.sheaf"',
+  );
+  c.header("Cache-Control", "public, max-age=300, s-maxage=300");
+  return c.body(SAMPLE_BUNDLE);
+});
+
+// Firewall demo: policy attached, allowed and blocked calls, complete evidence.
+app.get("/sample-bundle-policy.sheaf", (c) => {
+  c.header("Content-Type", "application/json; charset=utf-8");
+  c.header(
+    "Content-Disposition",
+    'attachment; filename="sample-bundle-policy.sheaf"',
+  );
+  c.header("Cache-Control", "public, max-age=300, s-maxage=300");
+  return c.body(FIREWALL_BUNDLE);
 });
 
 // Public verification page for a specific chain. Server-renders chain state
@@ -260,6 +528,43 @@ app.get("/c/:chain_id", async (c) => {
   return c.body(renderChainPage(summary, base));
 });
 
+app.get("/r/:chain_id/:seq", async (c) => {
+  if (!c.env.DB) return c.body("DB binding missing", 500);
+  const chainId = c.req.param("chain_id") ?? "";
+  const seq = Number.parseInt(c.req.param("seq") ?? "", 10);
+  if (!chainId || !Number.isInteger(seq) || seq < 0) {
+    return c.body("invalid receipt", 400);
+  }
+  const row = (await c.env.DB.prepare(
+    `SELECT e.chain_id, e.seq, e.tool, e.result, e.ts, e.epoch_id,
+            e.envelope_hash, ep.anchor_tx_hash
+     FROM events e
+     LEFT JOIN epochs ep ON ep.epoch_id = e.epoch_id
+     WHERE e.chain_id = ? AND e.seq = ?`,
+  )
+    .bind(chainId, seq)
+    .first()) as Record<string, unknown> | null;
+  if (!row) return c.body("receipt not found", 404);
+  c.header("Content-Type", "text/html; charset=utf-8");
+  c.header("Cache-Control", "public, max-age=60, s-maxage=60");
+  return c.body(
+    renderReceiptPage({
+      chain_id: String(row.chain_id),
+      seq: Number(row.seq),
+      tool: String(row.tool),
+      result: String(row.result),
+      ts: Number(row.ts),
+      epoch_id:
+        row.epoch_id === null || row.epoch_id === undefined
+          ? null
+          : Number(row.epoch_id),
+      envelope_hash: String(row.envelope_hash),
+      anchor_tx_hash:
+        typeof row.anchor_tx_hash === "string" ? row.anchor_tx_hash : null,
+    }),
+  );
+});
+
 app.get("/badge/:slug", async (c) => {
   if (!c.env.DB) return c.body("", 500);
   const slug = c.req.param("slug");
@@ -313,8 +618,12 @@ function validateSubmission(x: unknown): string | null {
   ]) {
     if (typeof ev[k] !== "string") return `event.${k} must be a string`;
   }
-  if (!["ok", "error", "timeout", "cancelled"].includes(ev.result as string))
-    return "event.result must be ok|error|timeout|cancelled";
+  if (
+    !["ok", "error", "timeout", "cancelled", "blocked"].includes(
+      ev.result as string,
+    )
+  )
+    return "event.result must be ok|error|timeout|cancelled|blocked";
   if (
     ev.outputs_hash !== null &&
     typeof ev.outputs_hash !== "string"
@@ -367,6 +676,153 @@ app.post("/accounts", async (c) => {
       500,
     );
   }
+});
+
+app.post("/v1/checkout", async (c) => {
+  if (c.env.PREVIEW_MODE === "true") {
+    return c.json({
+      status: "preview",
+      message:
+        "Paid tiers are coming soon. Use the free open-source tier for now.",
+    });
+  }
+  let body: { email?: string } = {};
+  try {
+    const raw = await c.req.text();
+    if (raw.trim()) body = JSON.parse(raw) as { email?: string };
+  } catch {
+    return c.json({ error: "invalid JSON body" }, 400);
+  }
+  const origin = new URL(c.req.url).origin;
+  const result = await createCheckoutSession(
+    c.env,
+    origin,
+    typeof body.email === "string" ? body.email : null,
+  );
+  if (!result.ok) {
+    return c.json(
+      {
+        ok: false,
+        error: result.error,
+        missing: result.missing ?? undefined,
+        checkout_url: null,
+        message:
+          result.error === "stripe_not_configured"
+            ? "Stripe is not configured on this deployment."
+            : result.error,
+      },
+      result.status as 500 | 503,
+    );
+  }
+  return c.json({
+    ok: true,
+    checkout_url: result.url,
+    session_id: result.session_id,
+  });
+});
+
+app.post("/v1/webhooks/stripe", async (c) => {
+  if (!c.env.DB) return c.json({ error: "DB binding missing" }, 500);
+  if (!c.env.STRIPE_WEBHOOK_SECRET) {
+    return c.json({ error: "STRIPE_WEBHOOK_SECRET missing" }, 503);
+  }
+  const raw = await c.req.text();
+  const signature = c.req.header("stripe-signature") ?? null;
+  const valid = await verifyStripeSignature(
+    raw,
+    signature,
+    c.env.STRIPE_WEBHOOK_SECRET,
+  );
+  if (!valid) return c.json({ error: "invalid Stripe signature" }, 400);
+
+  let event: any;
+  try {
+    event = JSON.parse(raw);
+  } catch {
+    return c.json({ error: "invalid JSON event" }, 400);
+  }
+  if (event?.type !== "checkout.session.completed") {
+    return c.json({ ok: true, ignored: true, type: event?.type ?? null });
+  }
+
+  const eventId = String(event.id ?? "");
+  if (!eventId) return c.json({ error: "event.id required" }, 400);
+  const seen = await c.env.DB.prepare(
+    "SELECT account_id FROM billing_events WHERE event_id = ?",
+  )
+    .bind(eventId)
+    .first();
+  if (seen) {
+    return c.json({
+      ok: true,
+      duplicate: true,
+      account_id: seen.account_id,
+    });
+  }
+
+  const session = event.data?.object ?? {};
+  const email =
+    session.customer_details?.email ??
+    session.customer_email ??
+    null;
+  if (typeof email !== "string" || !email.includes("@")) {
+    return c.json({ error: "checkout session has no customer email" }, 400);
+  }
+
+  const { account, api_key } = await createAccount(c.env.DB, email, "pro");
+  await c.env.DB.prepare(
+    `UPDATE accounts
+     SET stripe_customer_id = ?, stripe_subscription_id = ?
+     WHERE account_id = ?`,
+  )
+    .bind(
+      typeof session.customer === "string" ? session.customer : null,
+      typeof session.subscription === "string" ? session.subscription : null,
+      account.account_id,
+    )
+    .run();
+  await c.env.DB.prepare(
+    `INSERT INTO billing_events (event_id, type, account_id, email, created_at)
+     VALUES (?, ?, ?, ?, ?)`,
+  )
+    .bind(
+      eventId,
+      String(event.type),
+      account.account_id,
+      email,
+      Math.floor(Date.now() / 1000),
+    )
+    .run();
+
+  const delivered = await sendResendEmail(c.env, email, api_key);
+  if (!delivered.ok) {
+    const subject = "Your Sheaf Pro API key";
+    const body = [
+      "Thanks for subscribing to Sheaf Pro.",
+      "",
+      `API key: ${api_key}`,
+      "",
+      "Store it now. Sheaf only stores a hash and cannot retrieve it later.",
+    ].join("\n");
+    await c.env.DB.prepare(
+      `INSERT INTO email_outbox (email, subject, body, created_at, error)
+       VALUES (?, ?, ?, ?, ?)`,
+    )
+      .bind(
+        email,
+        subject,
+        body,
+        Math.floor(Date.now() / 1000),
+        delivered.error ?? "email delivery unavailable",
+      )
+      .run();
+  }
+
+  return c.json({
+    ok: true,
+    account_id: account.account_id,
+    email: delivered.ok ? "sent" : "queued",
+  });
 });
 
 app.post("/events", async (c) => {
@@ -1166,6 +1622,36 @@ function getPaymentMiddleware(env: Env) {
   );
   cachedPaymentMw = paymentMiddleware(
     {
+      "POST /v1/anchor/local": {
+        accepts: [
+          {
+            scheme: "exact",
+            price: "$0.01",
+            network,
+            payTo: env.PAYOUT_ADDRESS,
+          },
+        ],
+        description:
+          "Anchor a signed local Merkle root on Base L2 and store the public receipt. $0.01 USDC on Base via x402.",
+        mimeType: "application/json",
+        serviceName: "sheaf",
+        tags: ["anchor", "base-l2", "local-mode", "x402"],
+      },
+      "POST /v1/chains/:chain_id/export": {
+        accepts: [
+          {
+            scheme: "exact",
+            price: "$0.01",
+            network,
+            payTo: env.PAYOUT_ADDRESS,
+          },
+        ],
+        description:
+          "Export a portable .sheaf evidence bundle for a chain. $0.01 USDC on Base via x402.",
+        mimeType: "application/json",
+        serviceName: "sheaf",
+        tags: ["bundle", "export", "evidence", "x402"],
+      },
       "GET /bundle/:chain_id/:seq": {
         accepts: [
           {

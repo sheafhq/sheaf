@@ -5,6 +5,8 @@
 
 import { createInterface } from "node:readline";
 import {
+  anchorLocal,
+  buyBundle,
   chainHead,
   getProofFor,
   verifyBundle,
@@ -135,6 +137,49 @@ const TOOL_DEFS = [
       additionalProperties: false,
     },
   },
+  {
+    name: "sheaf_buy_bundle",
+    description: [
+      "Buy the self-contained paid Sheaf bundle for one event ($0.001 USDC on Base via x402).",
+      "",
+      "WHEN TO USE: You need the full signed envelope + Merkle proof + on-chain anchor in one artifact and have a funded Base wallet. The tool automatically parses a 402 response, signs the exact EIP-3009 payment authorization, and retries.",
+      "",
+      "PREREQUISITE: SHEAF_PAYER_PRIVATE_KEY (0x-prefixed) must be set on the MCP server. The wallet needs USDC on Base. No Sheaf account is required.",
+      "",
+      "EXAMPLE CALL:",
+      '  { "chain_id": "agent-run-2026-11-11-smoke", "seq": 7 }',
+    ].join("\n"),
+    inputSchema: {
+      type: "object",
+      properties: {
+        chain_id: { type: "string", description: "Chain identifier. Required." },
+        seq: { type: "integer", minimum: 0, description: "Event sequence number. Required." },
+      },
+      required: ["chain_id", "seq"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "sheaf_anchor_local",
+    description: [
+      "Pay $0.01 USDC on Base and anchor a signed local Merkle root via POST /v1/anchor/local.",
+      "",
+      "WHEN TO USE: A local `sheaf local sync` would return 402 and you want the agent to pay and anchor autonomously. Pass the exact signed anchor-request object produced by local sync.",
+      "",
+      "PREREQUISITE: SHEAF_PAYER_PRIVATE_KEY with USDC on Base. The request itself must be signed by the local recorder key.",
+    ].join("\n"),
+    inputSchema: {
+      type: "object",
+      properties: {
+        anchor_request: {
+          type: "object",
+          description: "The signed sheaf.local-anchor-request/1 payload.",
+        },
+      },
+      required: ["anchor_request"],
+      additionalProperties: false,
+    },
+  },
 ] as const;
 
 function ok(id: JsonRpcRequest["id"], result: unknown): JsonRpcResponse {
@@ -159,7 +204,7 @@ async function handle(
       return ok(id, {
         protocolVersion: "2025-03-26",
         capabilities: { tools: {} },
-        serverInfo: { name: "sheaf-mcp-tools", version: "0.1.0" },
+        serverInfo: { name: "sheaf-mcp-tools", version: "0.2.0" },
       });
     case "tools/list":
       return ok(id, { tools: TOOL_DEFS });
@@ -185,6 +230,18 @@ async function handle(
             data = await verifyBundle(
               ctx,
               args as { bundle: unknown; anchorer_address?: string },
+            );
+            break;
+          case "sheaf_buy_bundle":
+            data = await buyBundle(
+              ctx,
+              args as { chain_id: string; seq: number },
+            );
+            break;
+          case "sheaf_anchor_local":
+            data = await anchorLocal(
+              ctx,
+              args as { anchor_request: Record<string, unknown> },
             );
             break;
           default:

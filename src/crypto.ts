@@ -46,3 +46,43 @@ export async function signEd25519(
   const sig = await subtle.sign("Ed25519", key, data.buffer as ArrayBuffer);
   return new Uint8Array(sig);
 }
+
+/** Verify an Ed25519 signature from a raw 32-byte public key. */
+export async function verifyEd25519(
+  publicKeyBase64: string,
+  data: Uint8Array,
+  signatureBase64: string,
+): Promise<boolean> {
+  try {
+    const subtle = crypto.subtle as unknown as {
+      importKey(
+        f: string,
+        k: Uint8Array,
+        a: { name: string },
+        e: boolean,
+        u: string[],
+      ): Promise<CryptoKey>;
+      verify(
+        a: string,
+        k: CryptoKey,
+        s: Uint8Array,
+        d: ArrayBuffer,
+      ): Promise<boolean>;
+    };
+    const key = await subtle.importKey(
+      "raw",
+      b64decode(publicKeyBase64),
+      { name: "Ed25519" },
+      false,
+      ["verify"],
+    );
+    return await subtle.verify(
+      "Ed25519",
+      key,
+      b64decode(signatureBase64),
+      data.buffer as ArrayBuffer,
+    );
+  } catch {
+    return false;
+  }
+}

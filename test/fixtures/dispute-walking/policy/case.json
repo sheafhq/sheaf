@@ -1,0 +1,113 @@
+{
+  "case": {
+    "case_id": "CB-DEMO-FIREWALL-001",
+    "card_network": "visa",
+    "reason_code": {
+      "schema": "2026 Visa Claims Resolution guide",
+      "value": "10.4",
+      "label": "Other fraud — card-absent environment"
+    },
+    "transaction": {
+      "reference": "txn_demo_firewall_001",
+      "amount_minor": 12900,
+      "currency": "USD",
+      "occurred_at": "2026-11-10T16:42:11Z"
+    },
+    "merchant": {
+      "id": "merchant_demo_001",
+      "name": "Northwind Outfitters (synthetic)",
+      "url": "https://northwind-outfitters.example"
+    },
+    "response_due_at": "2026-11-24T23:59:59Z",
+    "dispute_basis": {
+      "category": "friendly_fraud",
+      "asserted_by": "merchant",
+      "merchant_position": "The $129 payment was within the signed mandate and policy. The agent later attempted a $200 payment; the policy blocked it before execution and recorded the violation."
+    },
+    "created_at": "2026-11-13T18:00:00Z"
+  },
+  "subject": {
+    "from_seq": 4,
+    "to_seq": 5,
+    "disputed_event_seqs": [
+      4
+    ],
+    "claims": {
+      "agent_id": {
+        "value": "agent://shopper-7",
+        "derived_from": "event.actor",
+        "ref": "seq:4"
+      },
+      "tool": {
+        "value": "mcp://shop/payment",
+        "derived_from": "event.tool",
+        "ref": "seq:4"
+      },
+      "merchant": {
+        "value": "northwind-outfitters.example",
+        "derived_from": "payload",
+        "ref": "pl_4_args",
+        "path": "$.merchant"
+      },
+      "amount_minor": {
+        "value": 12900,
+        "derived_from": "payload",
+        "ref": "pl_4_args",
+        "path": "$.amount_minor"
+      },
+      "currency": {
+        "value": "USD",
+        "derived_from": "payload",
+        "ref": "pl_4_args",
+        "path": "$.currency"
+      }
+    }
+  },
+  "evidence": {
+    "mandate": {
+      "seq": 1,
+      "document": "mandate.json"
+    },
+    "delegation": {
+      "root": {
+        "type": "human",
+        "id": "payer_demo_001",
+        "display_name": "A. Rivera (synthetic)",
+        "attestation": {
+          "basis": "principal_signature",
+          "key_id": "demo-policy-principal-1",
+          "public_key_base64": "eo9ISHXy/45APn6lKfUW3xFFtyER0h3ZJUnMetJFr5o=",
+          "signature_base64": "TZSjQ+9l2oQX5pEyOnybQ0lhTDIUMU5T5QVbz7inNAw4BtJgWkca3jP1WFhlliKA2/7AwW4bLCVKvLB49RepCA=="
+        }
+      },
+      "chain": [
+        {
+          "seq": 2,
+          "parent_seq": 1,
+          "document": "delegation.json"
+        }
+      ]
+    },
+    "consent": {
+      "seq": 3,
+      "document": "consent.json"
+    }
+  },
+  "payloads": [
+    {
+      "seq": 4,
+      "kind": "tool_arguments",
+      "path": "payloads/4-args.json"
+    },
+    {
+      "seq": 4,
+      "kind": "tool_result",
+      "path": "payloads/4-result.json"
+    },
+    {
+      "seq": 5,
+      "kind": "tool_arguments",
+      "path": "payloads/5-args-blocked.json"
+    }
+  ]
+}

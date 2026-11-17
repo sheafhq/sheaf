@@ -1,7 +1,7 @@
 {
   "name": "@sheafhq/verify",
-  "version": "0.1.2",
-  "description": "Standalone verifier for Sheaf receipts. Checks hash chain + Merkle inclusion + Ed25519 signature + Base L2 anchor, all offline (only reads the anchor tx from a Base RPC). Use as a library or run `npx @sheafhq/verify <bundle.sheaf>`.",
+  "version": "0.5.0",
+  "description": "Standalone verifier for Sheaf receipts and selective-disclosure sets. Checks hash chain + Merkle inclusion + Ed25519 signature + Base L2 anchor; dispute mode uses a pinned trust store and never fetches keys from a bundle. Use as a library or run `npx @sheafhq/verify <bundle.sheaf>`.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -14,9 +14,10 @@
       "types": "./dist/index.d.ts"
     }
   },
-  "files": ["dist", "README.md"],
+  "files": ["dist", "trust", "README.md"],
   "scripts": {
     "build": "tsc",
+    "test:disclosures": "npm run build && node test/trust.test.mjs",
     "prepublishOnly": "npm run build"
   },
   "keywords": [

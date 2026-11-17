@@ -18,6 +18,22 @@ export type JsonRpcNotification = {
   params?: unknown;
 };
 
+import type { PolicyDocument } from "./policy.js";
+
+export type PolicyMetadata = {
+  schema: "sheaf.policy/1";
+  hash: string;
+  verdict: "ALLOW" | "BLOCK" | "REQUIRE_APPROVAL";
+  reason_code: string;
+};
+
+export type LocalConfig = {
+  chainDir: string;
+  casePath?: string;
+  chainId?: string;
+  actor?: string;
+};
+
 export type RecorderConfig = {
   /** Primary + fallback recorder URLs. If SHEAF_RECORDER_URL is set, a single
    *  URL is used (no fallback — trust the explicit override). Otherwise the
@@ -28,6 +44,9 @@ export type RecorderConfig = {
   actor: string;             // SHEAF_ACTOR (default: chainId)
   captureMethods: Set<string>; // SHEAF_CAPTURE_METHODS
   logDebug: boolean;         // SHEAF_DEBUG
+  policy?: PolicyDocument;
+  policyHash?: string;       // sha256:hex
+  local?: LocalConfig;
 };
 
 export type PendingCall = {
@@ -35,4 +54,5 @@ export type PendingCall = {
   method: string;
   params: unknown;
   startedAt: number;
+  policy?: PolicyMetadata;
 };

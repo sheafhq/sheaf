@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sheafhq.io/schemas/sheaf.policy/1",
+  "title": "Sheaf runtime policy v1",
+  "description": "Deterministic tool-call policy for the Sheaf MCP recorder. Allowed tools, denied tools, and argument constraints. The policy hash is sha256(JCS(this document)).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "policy_id",
+    "issued_at",
+    "expires_at",
+    "default_verdict",
+    "allowed_tools",
+    "denied_tools",
+    "rules"
+  ],
+  "properties": {
+    "schema": { "const": "sheaf.policy/1" },
+    "policy_id": { "type": "string", "minLength": 1 },
+    "issued_at": { "type": "string", "format": "date-time" },
+    "expires_at": {
+      "type": ["string", "null"],
+      "format": "date-time"
+    },
+    "default_verdict": {
+      "enum": ["ALLOW", "BLOCK", "REQUIRE_APPROVAL"]
+    },
+    "allowed_tools": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "denied_tools": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "rules": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/rule" }
+    }
+  },
+  "$defs": {
+    "rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tool", "verdict", "constraints"],
+      "properties": {
+        "tool": { "type": "string", "minLength": 1 },
+        "verdict": {
+          "enum": ["ALLOW", "BLOCK", "REQUIRE_APPROVAL"]
+        },
+        "on_violation": {
+          "enum": ["BLOCK", "REQUIRE_APPROVAL"]
+        },
+        "constraints": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/constraint" }
+        }
+      }
+    },
+    "constraint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "op", "reason"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "op": {
+          "enum": [
+            "eq",
+            "neq",
+            "lt",
+            "lte",
+            "gt",
+            "gte",
+            "in",
+            "not_in",
+            "contains",
+            "required",
+            "domain_in"
+          ]
+        },
+        "value": {},
+        "reason": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

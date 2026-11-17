@@ -1,0 +1,675 @@
+{
+  "schema": "sheaf.dispute-bundle/1",
+  "created_at": "2026-11-12T22:05:00Z",
+  "producer": {
+    "name": "sheaf",
+    "version": "0.4.0",
+    "command": "sheaf dispute export"
+  },
+  "case": {
+    "case_id": "CB-DEMO-WALK-001",
+    "card_network": "[PLACEHOLDER: card network]",
+    "reason_code": {
+      "schema": "[PLACEHOLDER: 2026 Visa Claims Resolution guide]",
+      "value": "[PLACEHOLDER: reason code]",
+      "label": null
+    },
+    "transaction": {
+      "reference": "txn_demo_001",
+      "amount_minor": 12900,
+      "currency": "USD",
+      "occurred_at": "2026-11-10T16:42:11Z"
+    },
+    "merchant": {
+      "id": "merchant_demo_001",
+      "name": "Northwind Outfitters (synthetic)",
+      "url": "https://northwind-outfitters.example"
+    },
+    "response_due_at": "2026-11-24T23:59:59Z",
+    "dispute_basis": {
+      "category": "friendly_fraud",
+      "asserted_by": "merchant",
+      "merchant_position": "The payer authorized this agent and signed the consent receipt before checkout."
+    }
+  },
+  "subject": {
+    "chain_id": "demo-dispute-walking-20261112t213407z",
+    "from_seq": 3,
+    "to_seq": 4,
+    "selection": "contiguous_range",
+    "disputed_event_seqs": [
+      3
+    ],
+    "claims": {
+      "agent_id": {
+        "value": "agent://shopper-7",
+        "derived_from": "event.actor",
+        "ref": "seq:3"
+      },
+      "tool": {
+        "value": "mcp://shop/payment",
+        "derived_from": "event.tool",
+        "ref": "seq:3"
+      },
+      "merchant": {
+        "value": "northwind-outfitters.example",
+        "derived_from": "payload",
+        "ref": "pl_3_args",
+        "path": "$.merchant"
+      },
+      "amount_minor": {
+        "value": 12900,
+        "derived_from": "payload",
+        "ref": "pl_3_args",
+        "path": "$.amount_minor"
+      },
+      "currency": {
+        "value": "USD",
+        "derived_from": "payload",
+        "ref": "pl_3_args",
+        "path": "$.currency"
+      }
+    }
+  },
+  "recorder": {
+    "name": "sheaf",
+    "key_id": "sheaf-ed25519-2026-11-09",
+    "public_key_base64": "3HAltFwtHSZp83CLKYF/KKG2Ac4Se/YiD+AkfqCb+e8=",
+    "public_key_url": "https://sheaf-recorder.goldencalf.workers.dev/.well-known/sheaf-public-key"
+  },
+  "disclosures": [
+    {
+      "event_ref": {
+        "chain_id": "demo-dispute-walking-20261112t213407z",
+        "seq": 0
+      },
+      "envelope": {
+        "v": "arca/1",
+        "event": {
+          "kind": "mandate",
+          "intent": "issue mandate",
+          "actor": "payer_demo_001",
+          "authority": null,
+          "tool": "sheaf.mandate",
+          "inputs_hash": "sha256:93bb2e1dc2fbf4d6feddabe945ce5c2886b6a7512a7710a51527233adc0e8b25",
+          "outputs_hash": null,
+          "result": "ok",
+          "ts": "2026-11-10T16:30:00Z"
+        },
+        "chain": {
+          "chain_id": "demo-dispute-walking-20261112t213407z",
+          "seq": 0,
+          "prev_hash": null
+        },
+        "signatures": {
+          "actor": null,
+          "recorder": "XV6lbu4lPa41KCoRXGarnp+r3nXQEw5DI1Q9pW7tLiZ4bwyujyLBlcngymsq97P/Bcdf9vmD4rjytr1V6Vg4Dg=="
+        }
+      },
+      "envelope_hash": "f91de3677621f9e59c1ed869c9d97c7197e135974e0adba763577204f4702520",
+      "epoch_id": 5,
+      "leaf_index": 0,
+      "proof": {
+        "type": "merkle-inclusion/v1",
+        "siblings": [
+          {
+            "hash": "418d19ae4c333ff3a5aace5f659cdb182c3aeabf7d561fc675d6c3cc82d93295",
+            "side": "right"
+          },
+          {
+            "hash": "a23a0e49abddd185a96fe29ff7efe99152539ace83e44447db73365963c57c8b",
+            "side": "right"
+          },
+          {
+            "hash": "1cf68faea85046572ffcba3e458e550293a53a48a87fd0587af12706070b8d07",
+            "side": "right"
+          }
+        ],
+        "root": "272952fe5d7dfd7c34738353d515e52232de9bdbcb618823ce983c914da37d6e"
+      }
+    },
+    {
+      "event_ref": {
+        "chain_id": "demo-dispute-walking-20261112t213407z",
+        "seq": 1
+      },
+      "envelope": {
+        "v": "arca/1",
+        "event": {
+          "kind": "delegation",
+          "intent": "delegate authority",
+          "actor": "payer_demo_001",
+          "authority": "sheaf://demo-dispute-walking-20261112t213407z/0",
+          "tool": "sheaf.delegation",
+          "inputs_hash": "sha256:5697b9b66e61d21bc1f0b5a3afaf2d86326a17a8a8ec3fa789be7fa775f7070f",
+          "outputs_hash": null,
+          "result": "ok",
+          "ts": "2026-11-10T16:31:00Z"
+        },
+        "chain": {
+          "chain_id": "demo-dispute-walking-20261112t213407z",
+          "seq": 1,
+          "prev_hash": "f91de3677621f9e59c1ed869c9d97c7197e135974e0adba763577204f4702520"
+        },
+        "signatures": {
+          "actor": null,
+          "recorder": "9MF4pu2F4JJ2yx0qW/xSGeFoqEjsl0Xvj96Px/eZEHzjdEA4K0DxPa2AHAox9LKk08YHTTin/jihQ8La8abYBQ=="
+        }
+      },
+      "envelope_hash": "418d19ae4c333ff3a5aace5f659cdb182c3aeabf7d561fc675d6c3cc82d93295",
+      "epoch_id": 5,
+      "leaf_index": 1,
+      "proof": {
+        "type": "merkle-inclusion/v1",
+        "siblings": [
+          {
+            "hash": "f91de3677621f9e59c1ed869c9d97c7197e135974e0adba763577204f4702520",
+            "side": "left"
+          },
+          {
+            "hash": "a23a0e49abddd185a96fe29ff7efe99152539ace83e44447db73365963c57c8b",
+            "side": "right"
+          },
+          {
+            "hash": "1cf68faea85046572ffcba3e458e550293a53a48a87fd0587af12706070b8d07",
+            "side": "right"
+          }
+        ],
+        "root": "272952fe5d7dfd7c34738353d515e52232de9bdbcb618823ce983c914da37d6e"
+      }
+    },
+    {
+      "event_ref": {
+        "chain_id": "demo-dispute-walking-20261112t213407z",
+        "seq": 2
+      },
+      "envelope": {
+        "v": "arca/1",
+        "event": {
+          "kind": "consent",
+          "intent": "record payer consent",
+          "actor": "payer_demo_001",
+          "authority": "sheaf://demo-dispute-walking-20261112t213407z/1",
+          "tool": "sheaf.consent",
+          "inputs_hash": "sha256:4e6eeae35886843ba5ef4379ad565c1ce95080573e61af0faedf35e401d2a554",
+          "outputs_hash": null,
+          "result": "ok",
+          "ts": "2026-11-10T16:41:50Z"
+        },
+        "chain": {
+          "chain_id": "demo-dispute-walking-20261112t213407z",
+          "seq": 2,
+          "prev_hash": "418d19ae4c333ff3a5aace5f659cdb182c3aeabf7d561fc675d6c3cc82d93295"
+        },
+        "signatures": {
+          "actor": null,
+          "recorder": "6NwyiWNXzvouBIdXCqa/9V59WGf5Zruo+0xHnak2oOQyN18RsDZW+GEynWxi4XI9TaN8Kiceea7Fh44/XJiQBw=="
+        }
+      },
+      "envelope_hash": "19daff7b874f3fafbb868d4fd8b2998e4176ec3f941d9449a70b9974761d2776",
+      "epoch_id": 5,
+      "leaf_index": 2,
+      "proof": {
+        "type": "merkle-inclusion/v1",
+        "siblings": [
+          {
+            "hash": "24d10b71ab39da2e00e5fcf90ef2215b8e8f31c7fcfce70e7b2bc838524810d0",
+            "side": "right"
+          },
+          {
+            "hash": "9bec3392fd50e8e32d0b4c15fffdc2082debbe1b16bdc531b27a3385d5b6ca2c",
+            "side": "left"
+          },
+          {
+            "hash": "1cf68faea85046572ffcba3e458e550293a53a48a87fd0587af12706070b8d07",
+            "side": "right"
+          }
+        ],
+        "root": "272952fe5d7dfd7c34738353d515e52232de9bdbcb618823ce983c914da37d6e"
+      }
+    },
+    {
+      "event_ref": {
+        "chain_id": "demo-dispute-walking-20261112t213407z",
+        "seq": 3
+      },
+      "envelope": {
+        "v": "arca/1",
+        "event": {
+          "kind": "tool_call",
+          "intent": "authorize payment",
+          "actor": "agent://shopper-7",
+          "authority": "sheaf://demo-dispute-walking-20261112t213407z/1",
+          "tool": "mcp://shop/payment",
+          "inputs_hash": "sha256:2add0c561ffdaf5505dc26c2a5cd99aa5c29b91e70f0065285059da93eafb003",
+          "outputs_hash": "sha256:3fd7bf903da182dc0e3eb63d4c4f830dbec73081762d23d09462b6e8061201ad",
+          "result": "ok",
+          "ts": "2026-11-10T16:42:11Z"
+        },
+        "chain": {
+          "chain_id": "demo-dispute-walking-20261112t213407z",
+          "seq": 3,
+          "prev_hash": "19daff7b874f3fafbb868d4fd8b2998e4176ec3f941d9449a70b9974761d2776"
+        },
+        "signatures": {
+          "actor": null,
+          "recorder": "Wu1fJCxZxabiXryiV4tiAfUxbXlu0T4a7e5bxAcrqW/99fDlSzdclntAgOojolkZxYcd5X345HWI+R43+a5+Aw=="
+        }
+      },
+      "envelope_hash": "24d10b71ab39da2e00e5fcf90ef2215b8e8f31c7fcfce70e7b2bc838524810d0",
+      "epoch_id": 5,
+      "leaf_index": 3,
+      "proof": {
+        "type": "merkle-inclusion/v1",
+        "siblings": [
+          {
+            "hash": "19daff7b874f3fafbb868d4fd8b2998e4176ec3f941d9449a70b9974761d2776",
+            "side": "left"
+          },
+          {
+            "hash": "9bec3392fd50e8e32d0b4c15fffdc2082debbe1b16bdc531b27a3385d5b6ca2c",
+            "side": "left"
+          },
+          {
+            "hash": "1cf68faea85046572ffcba3e458e550293a53a48a87fd0587af12706070b8d07",
+            "side": "right"
+          }
+        ],
+        "root": "272952fe5d7dfd7c34738353d515e52232de9bdbcb618823ce983c914da37d6e"
+      }
+    },
+    {
+      "event_ref": {
+        "chain_id": "demo-dispute-walking-20261112t213407z",
+        "seq": 4
+      },
+      "envelope": {
+        "v": "arca/1",
+        "event": {
+          "kind": "tool_call",
+          "intent": "check order status",
+          "actor": "agent://shopper-7",
+          "authority": null,
+          "tool": "mcp://shop/order",
+          "inputs_hash": "sha256:bb81d4a39af50386db716c3951db666ee0a6d2e6039b031c3f34846adcf9c5e4",
+          "outputs_hash": "sha256:c202c2d81e69833f314b0f91a4a1c37d22479cfc4d6ee2c752eabb48ef033305",
+          "result": "ok",
+          "ts": "2026-11-10T16:43:20Z"
+        },
+        "chain": {
+          "chain_id": "demo-dispute-walking-20261112t213407z",
+          "seq": 4,
+          "prev_hash": "24d10b71ab39da2e00e5fcf90ef2215b8e8f31c7fcfce70e7b2bc838524810d0"
+        },
+        "signatures": {
+          "actor": null,
+          "recorder": "rItoGR4D24d1z2rTXWuoHPNMIaeorf512+HUdLHlM6ps08bok2iITmNIUTaTnDILktlRnUxAvIt62VM0RmnqAw=="
+        }
+      },
+      "envelope_hash": "966e17b27581d3dfc404a4169652932e25ccc13ce972f7e54112a13ba51a6563",
+      "epoch_id": 5,
+      "leaf_index": 4,
+      "proof": {
+        "type": "merkle-inclusion/v1",
+        "siblings": [
+          {
+            "hash": "966e17b27581d3dfc404a4169652932e25ccc13ce972f7e54112a13ba51a6563",
+            "side": "right"
+          },
+          {
+            "hash": "dd6059e1d2012d74c346a9a1b4a3141f555af0aaf7b138a0f3190ce5106661b8",
+            "side": "right"
+          },
+          {
+            "hash": "a2289a664a302f9d505aa1b63b4057b763e8540de072d81f05b9173e95d44456",
+            "side": "left"
+          }
+        ],
+        "root": "272952fe5d7dfd7c34738353d515e52232de9bdbcb618823ce983c914da37d6e"
+      }
+    }
+  ],
+  "evidence": {
+    "mandate": {
+      "status": "included",
+      "event_ref": {
+        "chain_id": "demo-dispute-walking-20261112t213407z",
+        "seq": 0
+      },
+      "document": {
+        "schema": "sheaf.mandate-document/1",
+        "mandate_id": "mnd_demo_001",
+        "principal": {
+          "type": "human",
+          "id": "payer_demo_001",
+          "display_name": "A. Rivera (synthetic)"
+        },
+        "agent": {
+          "type": "agent",
+          "id": "agent://shopper-7",
+          "display_name": "Shopping agent"
+        },
+        "scope": {
+          "merchant": "northwind-outfitters.example",
+          "tools": [
+            "mcp://shop/payment"
+          ],
+          "amount_max_minor": 15000,
+          "currency": "USD",
+          "valid_from": "2026-11-10T16:30:00Z",
+          "valid_until": "2026-11-11T16:30:00Z"
+        },
+        "issued_at": "2026-11-10T16:30:00Z",
+        "expires_at": "2026-11-11T16:30:00Z",
+        "nonce": "mnd_nonce_demo_001",
+        "document_signature": {
+          "alg": "Ed25519",
+          "key_id": "demo-principal-1",
+          "public_key_base64": "iiGhq6fcufeukdM6ceCzJi0jsEl+w1DbblRyqMErRDI=",
+          "signature_base64": "CjER34aHTNX5lCamoentuS+KMGxhQPKgVM9HjigRpPZVrX0i2c+m10c195446oO14DLPRcU48Omcu9nfu8XkBA=="
+        }
+      },
+      "document_hash": "93bb2e1dc2fbf4d6feddabe945ce5c2886b6a7512a7710a51527233adc0e8b25",
+      "document_signature": {
+        "alg": "Ed25519",
+        "key_id": "demo-principal-1",
+        "public_key_base64": "iiGhq6fcufeukdM6ceCzJi0jsEl+w1DbblRyqMErRDI=",
+        "signature_base64": "CjER34aHTNX5lCamoentuS+KMGxhQPKgVM9HjigRpPZVrX0i2c+m10c195446oO14DLPRcU48Omcu9nfu8XkBA=="
+      },
+      "authorization_basis": "principal_signature"
+    },
+    "delegation": {
+      "status": "included",
+      "root": {
+        "type": "human",
+        "id": "payer_demo_001",
+        "display_name": "A. Rivera (synthetic)",
+        "attestation": {
+          "basis": "principal_signature",
+          "key_id": "demo-principal-1",
+          "public_key_base64": "iiGhq6fcufeukdM6ceCzJi0jsEl+w1DbblRyqMErRDI=",
+          "signature_base64": "CjER34aHTNX5lCamoentuS+KMGxhQPKgVM9HjigRpPZVrX0i2c+m10c195446oO14DLPRcU48Omcu9nfu8XkBA=="
+        }
+      },
+      "chain": [
+        {
+          "event_ref": {
+            "chain_id": "demo-dispute-walking-20261112t213407z",
+            "seq": 1
+          },
+          "parent_event_ref": {
+            "chain_id": "demo-dispute-walking-20261112t213407z",
+            "seq": 0
+          },
+          "document": {
+            "schema": "sheaf.delegation-document/1",
+            "delegation_id": "dlg_demo_001",
+            "issuer": {
+              "type": "human",
+              "id": "payer_demo_001"
+            },
+            "subject": {
+              "type": "agent",
+              "id": "agent://shopper-7"
+            },
+            "parent_id": "mnd_demo_001",
+            "scope": {
+              "merchant": "northwind-outfitters.example",
+              "tools": [
+                "mcp://shop/payment"
+              ],
+              "amount_max_minor": 15000,
+              "currency": "USD",
+              "valid_from": "2026-11-10T16:30:00Z",
+              "valid_until": "2026-11-11T16:30:00Z"
+            },
+            "issued_at": "2026-11-10T16:31:00Z",
+            "expires_at": "2026-11-11T16:30:00Z",
+            "document_signature": {
+              "alg": "Ed25519",
+              "key_id": "demo-principal-1",
+              "public_key_base64": "iiGhq6fcufeukdM6ceCzJi0jsEl+w1DbblRyqMErRDI=",
+              "signature_base64": "YfU/XJHLG0kZnpOhix/QdZX7r/1OWUIKwZDY/kr3xLKL8sHpZTfPuM6TuIFNeBU1ys7+xWwANwgk6tN0h6cSAw=="
+            }
+          },
+          "document_hash": "5697b9b66e61d21bc1f0b5a3afaf2d86326a17a8a8ec3fa789be7fa775f7070f",
+          "document_signature": {
+            "alg": "Ed25519",
+            "key_id": "demo-principal-1",
+            "public_key_base64": "iiGhq6fcufeukdM6ceCzJi0jsEl+w1DbblRyqMErRDI=",
+            "signature_base64": "YfU/XJHLG0kZnpOhix/QdZX7r/1OWUIKwZDY/kr3xLKL8sHpZTfPuM6TuIFNeBU1ys7+xWwANwgk6tN0h6cSAw=="
+          },
+          "authorization_basis": "principal_signature"
+        }
+      ]
+    },
+    "execution": {
+      "window": {
+        "from_seq": 3,
+        "to_seq": 4,
+        "contiguous": true
+      },
+      "event_refs": [
+        {
+          "chain_id": "demo-dispute-walking-20261112t213407z",
+          "seq": 3
+        },
+        {
+          "chain_id": "demo-dispute-walking-20261112t213407z",
+          "seq": 4
+        }
+      ],
+      "before_ref": {
+        "chain_id": "demo-dispute-walking-20261112t213407z",
+        "seq": 2
+      },
+      "after_ref": null
+    },
+    "consent": {
+      "status": "included",
+      "event_ref": {
+        "chain_id": "demo-dispute-walking-20261112t213407z",
+        "seq": 2
+      },
+      "document": {
+        "schema": "sheaf.consent-document/1",
+        "consent_id": "consent_demo_001",
+        "payer": {
+          "type": "human",
+          "id": "payer_demo_001"
+        },
+        "agent_id": "agent://shopper-7",
+        "mandate_id": "mnd_demo_001",
+        "merchant": "northwind-outfitters.example",
+        "amount_minor": 12900,
+        "currency": "USD",
+        "consented_at": "2026-11-10T16:41:50Z",
+        "method": "payer_signature",
+        "session_id": "sess_demo_001",
+        "document_signature": {
+          "alg": "Ed25519",
+          "key_id": "demo-principal-1",
+          "public_key_base64": "iiGhq6fcufeukdM6ceCzJi0jsEl+w1DbblRyqMErRDI=",
+          "signature_base64": "r/CqMM43W1neHNkEL/FCqA0HwYCoFquK8w0OyFrNB9+5sh+oJLF8rofnyohfxkRhxIjFSdVpv5aomvEM70ESCA=="
+        }
+      },
+      "document_hash": "4e6eeae35886843ba5ef4379ad565c1ce95080573e61af0faedf35e401d2a554",
+      "document_signature": {
+        "alg": "Ed25519",
+        "key_id": "demo-principal-1",
+        "public_key_base64": "iiGhq6fcufeukdM6ceCzJi0jsEl+w1DbblRyqMErRDI=",
+        "signature_base64": "r/CqMM43W1neHNkEL/FCqA0HwYCoFquK8w0OyFrNB9+5sh+oJLF8rofnyohfxkRhxIjFSdVpv5aomvEM70ESCA=="
+      },
+      "authorization_basis": "payer_signature",
+      "consent_type": "payer_authorization",
+      "captured_at": "2026-11-10T16:41:50Z",
+      "artifact": {
+        "sha256": "4e6eeae35886843ba5ef4379ad565c1ce95080573e61af0faedf35e401d2a554",
+        "media_type": "application/json",
+        "content": {
+          "schema": "sheaf.consent-document/1",
+          "consent_id": "consent_demo_001",
+          "payer": {
+            "type": "human",
+            "id": "payer_demo_001"
+          },
+          "agent_id": "agent://shopper-7",
+          "mandate_id": "mnd_demo_001",
+          "merchant": "northwind-outfitters.example",
+          "amount_minor": 12900,
+          "currency": "USD",
+          "consented_at": "2026-11-10T16:41:50Z",
+          "method": "payer_signature",
+          "session_id": "sess_demo_001",
+          "document_signature": {
+            "alg": "Ed25519",
+            "key_id": "demo-principal-1",
+            "public_key_base64": "iiGhq6fcufeukdM6ceCzJi0jsEl+w1DbblRyqMErRDI=",
+            "signature_base64": "r/CqMM43W1neHNkEL/FCqA0HwYCoFquK8w0OyFrNB9+5sh+oJLF8rofnyohfxkRhxIjFSdVpv5aomvEM70ESCA=="
+          }
+        },
+        "attachment_ref": null
+      }
+    }
+  },
+  "anchor": {
+    "network": "eip155:8453",
+    "anchorer": "0x08A22c6899a8b2eccA4b2B752a89eD498d7b2100",
+    "epochs": [
+      {
+        "epoch_id": 5,
+        "merkle_root": "272952fe5d7dfd7c34738353d515e52232de9bdbcb618823ce983c914da37d6e",
+        "tx_hash": "0x847c6b718e7ebc0ef0efae87f74f10bf58c14ba668832896244dee2bb3a8271a",
+        "block_number": 56647675,
+        "block_hash": null,
+        "calldata": "0x415243410000000000000005272952fe5d7dfd7c34738353d515e52232de9bdbcb618823ce983c914da37d6e",
+        "explorer": "https://basescan.org/tx/0x847c6b718e7ebc0ef0efae87f74f10bf58c14ba668832896244dee2bb3a8271a"
+      }
+    ]
+  },
+  "payloads": [
+    {
+      "id": "pl_3_args",
+      "event_ref": {
+        "chain_id": "demo-dispute-walking-20261112t213407z",
+        "seq": 3
+      },
+      "kind": "tool_arguments",
+      "sha256": "2add0c561ffdaf5505dc26c2a5cd99aa5c29b91e70f0065285059da93eafb003",
+      "media_type": "application/json",
+      "canonicalization": "RFC8785",
+      "content": {
+        "merchant": "northwind-outfitters.example",
+        "amount_minor": 12900,
+        "currency": "USD",
+        "order_id": "order_demo_001",
+        "mandate_id": "mnd_demo_001",
+        "consent_id": "consent_demo_001"
+      },
+      "attachment_ref": null
+    },
+    {
+      "id": "pl_3_result",
+      "event_ref": {
+        "chain_id": "demo-dispute-walking-20261112t213407z",
+        "seq": 3
+      },
+      "kind": "tool_result",
+      "sha256": "3fd7bf903da182dc0e3eb63d4c4f830dbec73081762d23d09462b6e8061201ad",
+      "media_type": "application/json",
+      "canonicalization": "RFC8785",
+      "content": {
+        "status": "authorized",
+        "order_id": "order_demo_001",
+        "authorization_ref": "auth_demo_001"
+      },
+      "attachment_ref": null
+    },
+    {
+      "id": "pl_4_args",
+      "event_ref": {
+        "chain_id": "demo-dispute-walking-20261112t213407z",
+        "seq": 4
+      },
+      "kind": "tool_arguments",
+      "sha256": "bb81d4a39af50386db716c3951db666ee0a6d2e6039b031c3f34846adcf9c5e4",
+      "media_type": "application/json",
+      "canonicalization": "RFC8785",
+      "content": {
+        "order_id": "order_demo_001"
+      },
+      "attachment_ref": null
+    },
+    {
+      "id": "pl_4_result",
+      "event_ref": {
+        "chain_id": "demo-dispute-walking-20261112t213407z",
+        "seq": 4
+      },
+      "kind": "tool_result",
+      "sha256": "c202c2d81e69833f314b0f91a4a1c37d22479cfc4d6ee2c752eabb48ef033305",
+      "media_type": "application/json",
+      "canonicalization": "RFC8785",
+      "content": {
+        "status": "confirmed",
+        "order_id": "order_demo_001"
+      },
+      "attachment_ref": null
+    }
+  ],
+  "attachments": [],
+  "presentation": {
+    "title": "Dispute evidence — CB-DEMO-WALK-001",
+    "summary": "Northwind Outfitters (synthetic) recorded an agent-initiated transaction (USD 129.00) with mandate, delegation, payer-consent, and execution evidence.",
+    "timeline": [
+      {
+        "at": "2026-11-10T16:30:00Z",
+        "label": "Mandate issued",
+        "event_ref": {
+          "chain_id": "demo-dispute-walking-20261112t213407z",
+          "seq": 0
+        }
+      },
+      {
+        "at": "2026-11-10T16:31:00Z",
+        "label": "Authority delegated",
+        "event_ref": {
+          "chain_id": "demo-dispute-walking-20261112t213407z",
+          "seq": 1
+        }
+      },
+      {
+        "at": "2026-11-10T16:41:50Z",
+        "label": "Payer consent recorded",
+        "event_ref": {
+          "chain_id": "demo-dispute-walking-20261112t213407z",
+          "seq": 2
+        }
+      },
+      {
+        "at": "2026-11-10T16:42:11Z",
+        "label": "Disputed transaction recorded",
+        "event_ref": {
+          "chain_id": "demo-dispute-walking-20261112t213407z",
+          "seq": 3
+        }
+      }
+    ],
+    "limitations": [
+      "Case-to-chain linkage is merchant-attested, not proven.",
+      "Field-level redaction is not supported in v1.",
+      "Offline mode proves integrity, not anchor presence."
+    ]
+  },
+  "bundle_id": "sha256:6717e548ad96e729bc07c5b9f52965926fd8e91ebc0bf703cb366410fd6bb7fe",
+  "verification": {
+    "lib": "@sheafhq/verify",
+    "min_version": "0.4.0",
+    "cmd": "npx -y @sheafhq/cli@0.1.0 dispute verify <bundle.sheaf> --rpc <base-rpc>",
+    "trust": {
+      "recorder_key_id": "sheaf-ed25519-2026-11-09",
+      "anchorer_address": "0x08A22c6899a8b2eccA4b2B752a89eD498d7b2100",
+      "base_network": "eip155:8453"
+    }
+  }
+}

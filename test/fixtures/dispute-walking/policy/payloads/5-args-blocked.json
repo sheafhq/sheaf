@@ -1,0 +1,8 @@
+{
+  "merchant": "northwind-outfitters.example",
+  "amount_minor": 20000,
+  "currency": "USD",
+  "order_id": "order_demo_blocked_001",
+  "mandate_id": "mnd_demo_001",
+  "consent_id": "consent_demo_001"
+}

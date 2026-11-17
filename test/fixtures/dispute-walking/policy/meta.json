@@ -1,0 +1,47 @@
+{
+  "chain_id": "demo-dispute-firewall-20261113t180116z",
+  "anchorer": "0x08A22c6899a8b2eccA4b2B752a89eD498d7b2100",
+  "anchorer_note": "Canonical hosted-recorder anchorer. Labelled demo chain for Agent Firewall.",
+  "epoch_id": 11,
+  "merkle_root": "0ad26a00badc04789413ce24b60b6b1df38937cc9b5075458475372ac8d18c98",
+  "tx_hash": "0x9862358bd78c6c09ede9550ebb2d159b0f1ad37773eff8735cdb2784a7280575",
+  "block": 57016675,
+  "event_kinds": [
+    {
+      "seq": 0,
+      "kind": "policy",
+      "result": "ok",
+      "policy_verdict": "ALLOW"
+    },
+    {
+      "seq": 1,
+      "kind": "mandate",
+      "result": "ok",
+      "policy_verdict": null
+    },
+    {
+      "seq": 2,
+      "kind": "delegation",
+      "result": "ok",
+      "policy_verdict": null
+    },
+    {
+      "seq": 3,
+      "kind": "consent",
+      "result": "ok",
+      "policy_verdict": null
+    },
+    {
+      "seq": 4,
+      "kind": "tool_call",
+      "result": "ok",
+      "policy_verdict": "ALLOW"
+    },
+    {
+      "seq": 5,
+      "kind": "tool_call",
+      "result": "blocked",
+      "policy_verdict": "BLOCK"
+    }
+  ]
+}

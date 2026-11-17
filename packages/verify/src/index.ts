@@ -13,7 +13,17 @@ export * from "./types.js";
 export { canonicalize, sha256Hex, hashCanonical } from "./canonical.js";
 export { computeRootFromProof } from "./merkle.js";
 export { verifyEd25519 } from "./signature.js";
-export { fetchAnchorTx } from "./anchor.js";
+export { fetchAnchorTx, fetchChainId } from "./anchor.js";
+export { verifyDisclosures } from "./disclosures.js";
+export * from "./evidence.js";
+export * from "./dispute.js";
+export * from "./policy.js";
+export {
+  PINNED_ANCHORERS,
+  PINNED_RECORDER_KEYS,
+  defaultTrustStore,
+  publicKeyFingerprint,
+} from "./trust.js";
 
 /**
  * Verify an Sheaf receipt bundle. Returns `{ valid, checks, reason? }` with a

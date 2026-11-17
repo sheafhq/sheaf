@@ -1,0 +1,45 @@
+{
+  "schema": "sheaf.policy/1",
+  "policy_id": "demo-agent-payments-001",
+  "issued_at": "2026-11-10T16:28:00Z",
+  "expires_at": null,
+  "default_verdict": "BLOCK",
+  "allowed_tools": [
+    "mcp://shop/payment"
+  ],
+  "denied_tools": [],
+  "rules": [
+    {
+      "tool": "mcp://shop/payment",
+      "verdict": "ALLOW",
+      "on_violation": "BLOCK",
+      "constraints": [
+        {
+          "path": "amount_minor",
+          "op": "lte",
+          "value": 15000,
+          "reason": "amount_exceeds_limit"
+        },
+        {
+          "path": "currency",
+          "op": "eq",
+          "value": "USD",
+          "reason": "currency_not_usd"
+        },
+        {
+          "path": "order_id",
+          "op": "required",
+          "reason": "order_id_required"
+        },
+        {
+          "path": "merchant",
+          "op": "domain_in",
+          "value": [
+            "northwind-outfitters.example"
+          ],
+          "reason": "merchant_domain_not_allowed"
+        }
+      ]
+    }
+  ]
+}

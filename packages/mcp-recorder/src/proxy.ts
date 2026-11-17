@@ -6,6 +6,8 @@
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { RecorderClient } from "./envelope.js";
+import { LocalLedger } from "./local.js";
+import { enforceToolCall } from "./enforce.js";
 import type {
   JsonRpcRequest,
   JsonRpcResponse,
@@ -18,7 +20,9 @@ export function runProxy(
   childCmd: string,
   childArgs: string[],
 ): void {
-  const recorder = new RecorderClient(cfg);
+  const recorder = cfg.local
+    ? new LocalLedger(cfg)
+    : new RecorderClient(cfg);
   const pending = new Map<number | string, PendingCall>();
 
   const child = spawn(childCmd, childArgs, {
@@ -57,12 +61,24 @@ export function runProxy(
         "id" in msg &&
         cfg.captureMethods.has(msg.method)
       ) {
-        pending.set(msg.id, {
-          id: msg.id,
-          method: msg.method,
-          params: msg.params ?? {},
-          startedAt: Date.now(),
-        });
+        const enforced = enforceToolCall(msg, cfg, recorder);
+        if (enforced?.action === "blocked") {
+          // Do not forward. The blocked attempt is already queued for
+          // recording; return a structured policy error to the agent.
+          process.stdout.write(JSON.stringify(enforced.response) + "\n");
+          return;
+        }
+        pending.set(
+          msg.id,
+          enforced?.action === "forward"
+            ? enforced.call
+            : {
+                id: msg.id,
+                method: msg.method,
+                params: msg.params ?? {},
+                startedAt: Date.now(),
+              },
+        );
       }
     } catch {
       // Not valid JSON — just pass through.

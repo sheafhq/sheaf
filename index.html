@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sheaf — Dispute Bundle</title>
+<style>
+:root{--bg:#0a0b0d;--panel:#101216;--panel-2:#0d0f12;--line:#252830;--line-2:#343842;--text:#ecebe4;--muted:#8d9098;--acid:#c8ff6a;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;--sans:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+*{box-sizing:border-box}
+html{background:var(--bg)}
+body{margin:0;color:var(--text);background:linear-gradient(rgba(255,255,255,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.025) 1px,transparent 1px);background-size:48px 48px;font:16px/1.55 var(--sans);-webkit-font-smoothing:antialiased}
+a{color:inherit}
+.wrap{max-width:1120px;margin:0 auto;padding:0 28px}
+.top{border-bottom:1px solid var(--line);background:rgba(10,11,13,.9);backdrop-filter:blur(8px);position:sticky;top:0;z-index:5}
+.top .wrap{display:flex;align-items:center;justify-content:space-between;gap:20px;height:64px}
+.brand{font:700 13px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase}
+.brand b{color:var(--acid)}
+.top nav{display:flex;gap:20px;font:11px/1 var(--mono);color:var(--muted);letter-spacing:.08em;text-transform:uppercase}
+.top nav a:hover{color:var(--text)}
+main{padding:72px 0 0}
+.eyebrow,.label{font:11px/1.2 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--acid)}
+.label{color:var(--muted);margin-bottom:22px}
+h1{margin:18px 0 22px;max-width:900px;font-size:clamp(38px,6.2vw,78px);line-height:.98;letter-spacing:-.045em;font-weight:650}
+h1 span{color:var(--muted)}
+.lede{max-width:720px;margin:0 0 28px;color:#c5c3ba;font-size:19px}
+.lede strong,.body strong{color:var(--text);font-weight:600}
+.actions{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+.button{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:0 18px;border:1px solid var(--line-2);background:var(--panel);color:var(--text);text-decoration:none;font:600 12px/1 var(--mono);letter-spacing:.06em;text-transform:uppercase}
+.button:hover{border-color:var(--muted)}
+.button.primary{background:var(--acid);border-color:var(--acid);color:#0a0b0d}
+.button.primary:hover{background:#dcff9a}
+.micro{color:var(--muted);font:11px/1.4 var(--mono)}
+.hero{padding-bottom:72px;border-bottom:1px solid var(--line)}
+.hero-grid{display:grid;grid-template-columns:1.15fr .85fr;gap:56px;align-items:end}
+.artifact{border:1px solid var(--line-2);background:var(--panel);box-shadow:0 18px 60px rgba(0,0,0,.35)}
+.artifact-head,.artifact-foot{display:flex;justify-content:space-between;gap:12px;padding:12px 14px;font:11px/1.2 var(--mono);color:var(--muted);border-bottom:1px solid var(--line)}
+.artifact-foot{border-top:1px solid var(--line);border-bottom:0}
+.ok{color:var(--acid)}
+.artifact pre{margin:0;padding:16px 14px;overflow:auto;color:#d8d6cc;font:12px/1.65 var(--mono)}
+.artifact .k{color:var(--muted)}
+.artifact .v{color:var(--acid)}
+section{padding:64px 0;border-bottom:1px solid var(--line)}
+.split{display:grid;grid-template-columns:220px 1fr;gap:48px}
+h2{margin:0 0 14px;font-size:clamp(26px,3.2vw,40px);line-height:1.05;letter-spacing:-.035em;font-weight:600}
+.body{max-width:760px;color:#b9b7ae}
+.body p{margin:0 0 16px}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line);border:1px solid var(--line);margin-top:28px}
+.stat{background:var(--panel-2);padding:18px}
+.stat b{display:block;color:var(--text);font:600 26px/1.1 var(--mono);letter-spacing:-.04em}
+.stat span{display:block;margin-top:8px;color:var(--muted);font:10px/1.4 var(--mono);text-transform:uppercase;letter-spacing:.08em}
+.stack{display:grid;grid-template-columns:repeat(2,1fr);gap:1px;background:var(--line);border:1px solid var(--line);margin-top:24px}
+.step{background:var(--panel-2);padding:20px}
+.step .n{color:var(--acid);font:11px/1 var(--mono);letter-spacing:.12em}
+.step h3{margin:10px 0 6px;font-size:17px;font-weight:600}
+.step p{margin:0;color:var(--muted);font-size:14px}
+.proof{display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start}
+.proof-card{border:1px solid var(--line);background:var(--panel);padding:22px}
+.proof-card h3{margin:0 0 10px;font-size:18px;font-weight:600}
+.proof-card p{margin:0 0 16px;color:var(--muted);font-size:14px}
+.proof-card .button{width:100%;margin-top:8px}
+.checks{margin:18px 0 0;padding:0;list-style:none;columns:2;column-gap:24px;color:var(--muted);font:11px/1.9 var(--mono)}
+.checks li::before{content:"✓";color:var(--acid);margin-right:8px}
+.cta{padding:64px 0 80px;border-bottom:0}
+.cta h2{max-width:760px}
+footer{padding:24px 0 40px;color:var(--muted);font:11px/1.6 var(--mono)}
+footer .wrap{display:flex;flex-wrap:wrap;justify-content:space-between;gap:16px}
+footer a{color:var(--muted);text-decoration:none;border-bottom:1px solid var(--line-2)}
+footer a:hover{color:var(--text)}
+@media (max-width:820px){.hero-grid,.split,.proof{grid-template-columns:1fr;gap:28px}.stats,.stack{grid-template-columns:1fr}.top nav{display:none}main{padding-top:48px}}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <div class="brand">SHEAF <b>//</b> DISPUTE</div>
+    <nav aria-label="Primary"><a href="#problem">Problem</a><a href="#solution">Solution</a><a href="#proof">Proof</a><a href="#contact">Contact</a></nav>
+  </div>
+</header>
+
+<main>
+  <section class="hero">
+    <div class="wrap hero-grid">
+      <div>
+        <div class="eyebrow">Dispute Bundle / sheaf.dispute-bundle/1</div>
+        <h1>Prove the agent was authorized.<br><span>Not just that the charge happened.</span></h1>
+        <p class="lede">Visa and Mastercard’s 2026 guidance raises the evidentiary bar: merchants must show <strong>agent legitimacy</strong>, not only transaction completion. Checkout logs are mutable. A screenshot is not evidence.</p>
+        <div class="actions"><a class="button primary" href="#contact">Contact us to integrate</a><a class="button" href="#proof">See the sample bundle</a></div>
+        <p class="micro" style="margin-top:16px">Ed25519 · RFC 8785 · Merkle inclusion · Base L2 anchor · offline verification</p>
+      </div>
+      <div class="artifact" aria-label="Sample bundle structure">
+        <div class="artifact-head"><span>sample.sheaf</span><span class="ok">VALID</span></div>
+        <pre><span class="k">"schema"</span>: <span class="v">"sheaf.dispute-bundle/1"</span>,
+<span class="k">"bundle_id"</span>: <span class="v">"sha256:6717…"</span>,
+<span class="k">"case"</span>: { <span class="v">"dispute_basis"</span>: … },
+<span class="k">"subject"</span>: { <span class="v">"from_seq"</span>: 3, <span class="v">"to_seq"</span>: 4 },
+<span class="k">"evidence"</span>: {
+  <span class="v">"mandate"</span>: …,
+  <span class="v">"delegation"</span>: …,
+  <span class="v">"consent"</span>: …,
+  <span class="v">"execution"</span>: …
+},
+<span class="k">"anchor"</span>: { <span class="v">"network"</span>: <span class="v">"eip155:8453"</span> }</pre>
+        <div class="artifact-foot"><span>5 events · epoch 5</span><span>Base mainnet</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="problem">
+    <div class="wrap split">
+      <div class="label">01 / The problem</div>
+      <div class="body">
+        <h2>The dispute is no longer “did the transaction complete?”</h2>
+        <p>It is “<strong>was the agent actually authorized to act for this payer?</strong>” The merchant holds the checkout session, the order record, and the agent logs. The issuer has no independent reason to trust any of them. Logs can be edited. Sessions can be replayed. Screenshots prove nothing.</p>
+        <div class="stats">
+          <div class="stat"><b>~2.4×</b><span>agent-initiated card dispute rate vs. comparable human CNP</span></div>
+          <div class="stat"><b>~76%</b><span>of those disputes are friendly fraud</span></div>
+          <div class="stat"><b>22% → 68%</b><span>measured representment lift with signed, machine-readable evidence</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="solution">
+    <div class="wrap split">
+      <div class="label">02 / The solution</div>
+      <div class="body">
+        <h2>A portable evidence bundle, not a dashboard row.</h2>
+        <p>A <strong>.sheaf</strong> Dispute Bundle binds the authorization claim to the execution record and anchors it on Base L2. The issuer’s analyst can verify it offline with a pinned key and any Base RPC. No Sheaf server. No trust in the merchant’s mutable logs.</p>
+        <div class="stack">
+          <div class="step"><div class="n">01 / MANDATE</div><h3>What the agent could do</h3><p>Merchant, tools, amount ceiling, validity window, named principal.</p></div>
+          <div class="step"><div class="n">02 / DELEGATION</div><h3>Who authorized the agent</h3><p>Chain of authority back to a human or policy, with parent refs.</p></div>
+          <div class="step"><div class="n">03 / CONSENT</div><h3>That the payer agreed</h3><p>Hash-bound payer authorization, timestamped before execution.</p></div>
+          <div class="step"><div class="n">04 / EXECUTION</div><h3>What actually happened</h3><p>Signed, hash-chained tool calls with payload hashes and Merkle inclusion proofs.</p></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="proof">
+    <div class="wrap split">
+      <div class="label">03 / The proof</div>
+      <div class="body">
+        <h2>Download it. Verify it yourself.</h2>
+        <p>The sample is a real 5-event chain anchored on Base mainnet: mandate, delegation, consent, disputed tool call, trailing tool call. The verifier prints every check — including the anchor and the evidence gaps, if any.</p>
+        <div class="proof">
+          <div class="proof-card">
+            <h3>Sample bundle</h3>
+            <p>A <code>.sheaf</code> JSON artifact with signed envelopes, Merkle proofs, and the Base tx reference.</p>
+            <a class="button primary" href="test/fixtures/dispute-walking/bundle.sheaf" download="sheaf-dispute-sample.sheaf">Download sample .sheaf</a>
+          </div>
+          <div class="proof-card">
+            <h3>Browser verifier</h3>
+            <p>Single-file verifier. Drop the bundle in. Default is offline integrity-only; add <code>?rpc=</code> for anchor confirmation.</p>
+            <a class="button" href="dispute-verify.html" target="_blank" rel="noreferrer">Open dispute-verify.html ↗</a>
+          </div>
+        </div>
+        <ul class="checks">
+          <li>schema_supported</li><li>bundle_id_matches</li><li>selection_contiguous</li><li>chain_links</li>
+          <li>disclosure_signatures_and_proofs</li><li>anchor_roots_match</li><li>payload_hashes_match</li><li>mandate_evidence</li>
+          <li>delegation_authority</li><li>consent_evidence</li><li>temporal_order</li><li>anchor_on_base</li>
+          <li>completeness</li><li>evidence_gaps</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section id="contact" class="cta">
+    <div class="wrap split">
+      <div class="label">04 / Integrate</div>
+      <div class="body">
+        <h2>Contact us to integrate this into your representment workflow.</h2>
+        <p>If you run representment, chargeback operations, or a PSP risk desk, the integration surface is the export artifact and the verifier — not a dashboard migration. We will map the bundle to your intake schema and reason-code workflow.</p>
+        <div class="actions"><a class="button primary" href="https://github.com/sheafhq/sheaf/issues/new?title=Dispute%20Bundle%20integration" target="_blank" rel="noreferrer">Contact us ↗</a><a class="button" href="docs/AUTHORING.md">Read the authoring guide</a></div>
+        <p class="micro" style="margin-top:16px">Production merchants use their own dedicated anchorer. Sheaf’s canonical anchorer is for the demo chain only.</p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>Sheaf — third-party execution recorder. MIT licensed.</span>
+    <span><a href="https://github.com/sheafhq/sheaf">github.com/sheafhq/sheaf</a> · <a href="docs/DISPUTE-BUNDLE-PLAN.md">plan</a> · <a href="docs/AUTHORING.md">authoring</a></span>
+  </div>
+</footer>
+</body>
+</html>

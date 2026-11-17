@@ -6,12 +6,15 @@
 // settlement, no mutation. Safe to expose to any agent.
 
 import { verify } from "@sheafhq/verify";
+import { createX402Payer, paidFetch } from "./x402.js";
 
 export type ToolContext = {
   /** Primary + fallback recorder base URLs. First entry is reported as
    *  `source_url` in responses. Fallback only kicks in on fetch error. */
   recorderUrls: string[];
   baseRpc: string;
+  /** Optional 0x-prefixed Base wallet key. Required only for paid tools. */
+  payerKey?: string;
 };
 
 async function fetchWithFallback(
@@ -56,6 +59,72 @@ type ProofResponse = {
   };
   verification_note: string;
 };
+
+function paidPayer(ctx: ToolContext) {
+  if (!ctx.payerKey) {
+    throw new Error(
+      "SHEAF_PAYER_PRIVATE_KEY is required for paid tools; fund it with USDC on Base",
+    );
+  }
+  return createX402Payer(ctx.payerKey);
+}
+
+/** Buy the self-contained paid /bundle artifact, handling 402 automatically. */
+export async function buyBundle(
+  ctx: ToolContext,
+  args: { chain_id: string; seq: number },
+): Promise<unknown> {
+  if (!args.chain_id || typeof args.chain_id !== "string") {
+    throw new Error("chain_id (string) is required");
+  }
+  if (!Number.isInteger(args.seq) || args.seq < 0) {
+    throw new Error("seq (non-negative integer) is required");
+  }
+  const payer = paidPayer(ctx);
+  const url = `${ctx.recorderUrls[0]}/bundle/${encodeURIComponent(args.chain_id)}/${args.seq}`;
+  const response = await paidFetch(url, { method: "GET" }, payer);
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`bundle purchase failed (${response.status}): ${text.slice(0, 500)}`);
+  }
+  return {
+    paid: true,
+    payer: payer.address,
+    settlement: response.headers.get("PAYMENT-RESPONSE"),
+    bundle: JSON.parse(text),
+  };
+}
+
+/** Anchor a local Merkle root through the paid /v1/anchor/local endpoint. */
+export async function anchorLocal(
+  ctx: ToolContext,
+  args: { anchor_request: Record<string, unknown> },
+): Promise<unknown> {
+  if (!args.anchor_request || typeof args.anchor_request !== "object") {
+    throw new Error("anchor_request (object) is required");
+  }
+  const payer = paidPayer(ctx);
+  const url = `${ctx.recorderUrls[0]}/v1/anchor/local`;
+  const response = await paidFetch(
+    url,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(args.anchor_request),
+    },
+    payer,
+  );
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`local anchor failed (${response.status}): ${text.slice(0, 500)}`);
+  }
+  return {
+    paid: true,
+    payer: payer.address,
+    settlement: response.headers.get("PAYMENT-RESPONSE"),
+    anchor: JSON.parse(text),
+  };
+}
 
 export async function chainHead(
   ctx: ToolContext,

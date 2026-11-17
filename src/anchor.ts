@@ -47,6 +47,7 @@ export type AnchorResult = {
   to: string;
   epoch_id: number;
   root: string;
+  block_number?: number | null;
 };
 
 export async function anchorRoot(
@@ -54,6 +55,7 @@ export async function anchorRoot(
   epochId: number,
   rootHex: string,
   authedRpcUrl?: string,
+  waitForReceipt = false,
 ): Promise<AnchorResult> {
   const account = privateKeyToAccount(privateKeyHex as Hex);
   const data = encodeCalldata(epochId, rootHex);
@@ -79,6 +81,12 @@ export async function anchorRoot(
     data,
   });
 
+  let blockNumber: number | null = null;
+  if (waitForReceipt) {
+    const receipt = await pub.waitForTransactionReceipt({ hash });
+    blockNumber = Number(receipt.blockNumber);
+  }
+
   return {
     tx_hash: hash,
     calldata: data,
@@ -86,6 +94,7 @@ export async function anchorRoot(
     to: account.address,
     epoch_id: epochId,
     root: rootHex,
+    block_number: blockNumber,
   };
 
   // Not waiting for confirmation here — caller can poll /epoch/:id later.
