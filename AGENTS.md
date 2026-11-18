@@ -48,6 +48,10 @@ had already gone to npm from a copy that didn't match production.
    Deploy only through `scripts/deploy/deploy.ps1 -Mode check|dry-run|deploy`.
    It uses the DPAPI-stored Cloudflare token (`scripts/deploy/cf-token.ps1`);
    never decrypt or print it.
+   Push to GitHub only through `scripts/deploy/gh-push.ps1` (fast-forward,
+   default `main:main`, `-DryRun` to test). It uses the DPAPI-stored GitHub
+   token (`scripts/deploy/gh-token.ps1 -Save|-Status|-Clear`, expires
+   2026-12-11); never decrypt or print it.
 9. **Leave a trail.** Add a `CHANGELOG.md` entry for anything user-visible,
    and end with a handoff note: what changed, what's committed or pushed, what's
    deployed or published, and what's still open.
