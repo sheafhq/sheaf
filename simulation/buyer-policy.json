@@ -1,0 +1,28 @@
+{
+  "version": "sheaf-policy/1",
+  "id": "buyer-max-budget-eur-150",
+  "description": "Buyer agent may purchase premium data. Any single purchase above EUR 150 is denied, which blocks buy_enterprise_data (EUR 200). Anything not explicitly allowed is denied.",
+  "default_effect": "deny",
+  "rules": [
+    {
+      "id": "deny-non-eur",
+      "effect": "deny",
+      "tools": ["*"],
+      "when": { "path": "arguments.currency", "op": "neq", "value": "EUR" },
+      "reason": "Budget is denominated in EUR; purchases in any other currency are refused"
+    },
+    {
+      "id": "deny-over-budget",
+      "effect": "deny",
+      "tools": ["*"],
+      "when": { "path": "arguments.amount", "op": "gt", "value": 150 },
+      "reason": "Amount exceeds the max budget of EUR 150"
+    },
+    {
+      "id": "allow-premium-data",
+      "effect": "allow",
+      "tools": ["buy_premium_data"],
+      "reason": "Premium data is an approved purchase within budget"
+    }
+  ]
+}

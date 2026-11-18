@@ -1,0 +1,5 @@
+node_modules/
+# per-run state: ephemeral keys, wrangler D1, anvil + wrangler logs
+.state/
+# exported .sheaf bundles
+out/

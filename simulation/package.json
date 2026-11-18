@@ -1,0 +1,25 @@
+{
+  "name": "sheaf-agent-economy-sim",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Agent Economy in a Box: a policy-constrained buyer agent, a mock merchant MCP server, the real Sheaf recorder under wrangler dev, an anvil chain for anchoring, and an offline notary. Zero cloud dependencies.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "sim": "node --import tsx run-sim.ts",
+    "notary": "node --disable-warning=ExperimentalWarning --import tsx notary.ts",
+    "merchant": "node --import tsx merchant-server.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@sheafhq/mcp-recorder": "0.3.0",
+    "@sheafhq/verify": "^0.1.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.0"
+  }
+}
