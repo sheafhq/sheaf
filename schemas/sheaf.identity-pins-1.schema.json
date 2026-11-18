@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sheafhq.io/schemas/sheaf.identity-pins/1",
+  "title": "Sheaf relying-party identity pins v1 (SAP)",
+  "description": "The relying party's OWN list of trusted root identities (sids of sheaf.identity/1 root inceptions). Never shipped by Sheaf, never taken from a bundle. Pinning a non-root has no effect: trust is always decided at the root of the controller chain.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "pins"],
+  "properties": {
+    "schema": { "const": "sheaf.identity-pins/1" },
+    "pins": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sid"],
+        "properties": {
+          "sid": { "type": "string", "pattern": "^sid:[0-9a-f]{64}$" },
+          "label": { "type": "string", "maxLength": 256 }
+        }
+      }
+    }
+  }
+}

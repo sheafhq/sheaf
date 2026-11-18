@@ -6,6 +6,18 @@ No application code changes are made as part of this design.
 
 "SAP" is a working name.
 
+> **Status (2026-11-18)**
+>
+> - **Owner decisions** (close D-items in §19.2 and the Phase 1 audit):
+>   - Mandate issuers are trusted only via **pinned root inceptions**, never "any well-formed key".
+>   - REQUIRE_APPROVAL **blocks until a `sheaf.approval/1` bound to `transaction_hash` is signed**.
+>   - The engine is the pure library **`@sheafhq/authority`, run in-process by the firewall**; the hosted recorder stays a witness.
+>   - **Revocation is deferred to Phase 6**; until then every result reports `UNVERIFIED_REVOCATION_STATE`.
+>   - Bundles move to **`sheaf.dispute-bundle/2`**. v1 now rejects unknown top-level keys, and v2 is refused until its authority section can be verified (`schemas/sheaf.dispute-bundle-2.md`).
+> - **S2** (Phase 1 audit, finding E): fixed and deployed. Claims are checked against signed data (CHANGELOG "SECURITY (S2)").
+> - **Phase 2 (identity): implemented**, in `packages/authority` with `test/identity.test.mjs` (18). The scope is inceptions, pins and inception-only `resolveKey`; key events fail closed. It adds rules stricter than §5.1: proof of possession for every signing key, non-roots self-sign, and pre-rotation must name a new key. See `packages/authority/README.md`.
+> - **Next:** Phase 3 (grants + attenuation), after owner review of Phase 2.
+
 ### What changed in revision 2
 
 | # | Owner requirement | Where it's addressed |
