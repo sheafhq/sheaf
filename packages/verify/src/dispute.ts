@@ -35,6 +35,37 @@ import type {
 
 export const DISPUTE_BUNDLE_SCHEMA = "sheaf.dispute-bundle/1";
 
+/**
+ * `sheaf.dispute-bundle/2` = every v1 key plus a top-level `authority` section
+ * (SAP, docs/SAP-ARCHITECTURE.md §12). The format is defined in
+ * schemas/sheaf.dispute-bundle-2.md. Verifying the authority section needs
+ * SAP phases 3-9; until then this verifier REFUSES v2 bundles instead of
+ * verifying only their v1 part and ignoring the authority section.
+ */
+export const DISPUTE_BUNDLE_SCHEMA_V2 = "sheaf.dispute-bundle/2";
+
+/** The complete set of top-level keys a v1 bundle may carry. Anything else
+ *  is rejected, so a v2 bundle relabelled as v1 fails closed. */
+export const DISPUTE_BUNDLE_V1_KEYS: readonly string[] = [
+  "schema",
+  "created_at",
+  "producer",
+  "case",
+  "subject",
+  "recorder",
+  "disclosures",
+  "evidence",
+  "anchor",
+  "payloads",
+  "policy",
+  "attachments",
+  "presentation",
+  "bundle_id",
+  "verification",
+];
+
+/** v2 top-level keys: v1 plus `authority`. */
+export const DISPUTE_BUNDLE_V2_KEYS: readonly string[] = [...DISPUTE_BUNDLE_V1_KEYS, "authority"];
 
 export const DISPUTE_CHECK_NAMES = [
   "schema_supported",
@@ -999,6 +1030,24 @@ export async function verifyDisputeBundle(
   };
 
   // 1. schema and basic shape
+  if (bundle && typeof bundle === "object" && bundle.schema === DISPUTE_BUNDLE_SCHEMA_V2) {
+    return fail(
+      1,
+      "SCHEMA_UNSUPPORTED",
+      "sheaf.dispute-bundle/2 is recognised, but this verifier cannot verify its authority section yet; " +
+        "refusing it rather than verifying only the v1 part",
+    );
+  }
+  if (bundle && typeof bundle === "object" && !Array.isArray(bundle)) {
+    const unknown = Object.keys(bundle).filter((k) => !DISPUTE_BUNDLE_V1_KEYS.includes(k)).sort();
+    if (unknown.length > 0 && bundle.schema === DISPUTE_BUNDLE_SCHEMA) {
+      return fail(
+        1,
+        "SCHEMA_UNSUPPORTED",
+        `unknown top-level key(s) for sheaf.dispute-bundle/1: ${unknown.join(", ")}`,
+      );
+    }
+  }
   if (
     !bundle ||
     typeof bundle !== "object" ||
