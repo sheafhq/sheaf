@@ -42,6 +42,7 @@ import {
 import { renderChainPage, type ChainSummary } from "./chain-page.js";
 import { renderBadge } from "./badge.js";
 import { renderReceiptPage, type ReceiptPageData } from "./receipt-page.js";
+import { parseLead, storeLead } from "./leads.js";
 import type {
   ChainHead,
   Envelope,
@@ -369,7 +370,8 @@ app.get("/manifest", (c) => {
         { pattern: "GET /.well-known/sheaf-public-key", example: `${origin}/.well-known/sheaf-public-key`, note: "issuer public keys" },
         { pattern: "GET /whitepaper", example: `${origin}/whitepaper`, note: "technical whitepaper (HTML)" },
         { pattern: "GET /llms.txt", example: `${origin}/llms.txt`, note: "LLM-optimized install and usage guide" },
-        { pattern: "POST /v1/checkout", example: `${origin}/v1/checkout`, note: "Stripe Checkout for Sheaf Pro" },
+        { pattern: "POST /v1/checkout", example: `${origin}/v1/checkout`, note: "Stripe Checkout for Sheaf Pro (Developer Preview: returns a waitlist pointer)" },
+        { pattern: "POST /v1/lead", example: `${origin}/v1/lead`, note: "join the Pro waitlist: {email, use_case, tier_interest: local|compliance|dispute|other}" },
         { pattern: "GET /verify", example: `${origin}/verify`, note: "single-file Dispute Bundle verifier (HTML; no Sheaf server during verification)" },
         { pattern: "GET /sample-bundle.sheaf", example: `${origin}/sample-bundle.sheaf`, note: "Base-anchored walking-skeleton sample bundle" },
         { pattern: "GET /sample-bundle-policy.sheaf", example: `${origin}/sample-bundle-policy.sheaf`, note: "Agent Firewall sample bundle (policy, allowed + blocked calls)" },
@@ -801,12 +803,29 @@ app.post("/accounts", async (c) => {
   }
 });
 
+// Developer Preview waitlist. Stores {email, use_case, tier_interest} in D1
+// `leads` (one row per email). See src/leads.ts for validation and storage.
+app.post("/v1/lead", async (c) => {
+  c.header("Cache-Control", "no-store");
+  if (!c.env.DB) return c.json({ ok: false, error: "DB binding missing" }, 500);
+  const parsed = parseLead(await c.req.text());
+  if (!parsed.ok) return c.json({ ok: false, error: parsed.error }, 400);
+  // Honeypot hit: answer exactly like a success, store nothing.
+  if (parsed.honeypot) return c.json({ ok: true });
+  try {
+    await storeLead(c.env.DB, parsed.lead, Math.floor(Date.now() / 1000));
+  } catch {
+    return c.json({ ok: false, error: "could not save; please try again" }, 500);
+  }
+  return c.json({ ok: true });
+});
+
 app.post("/v1/checkout", async (c) => {
   if (c.env.PREVIEW_MODE === "true") {
     return c.json({
       status: "preview",
-      message:
-        "Paid tiers are coming soon. Use the free open-source tier for now.",
+      message: "Paid tiers are coming soon. Join the waitlist below for early access.",
+      waitlist_url: "https://sheafhq.io/#waitlist",
     });
   }
   let body: { email?: string } = {};
