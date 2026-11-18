@@ -16,7 +16,12 @@
 param(
   [string]$Repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path,
   [string]$Refspec = 'main:main',
-  [switch]$DryRun
+  [switch]$DryRun,
+  # Push with git inside WSL instead of Git for Windows. Use when Windows git
+  # cannot reach GitHub (seen 2026-11-18: "getaddrinfo() thread failed to
+  # start" from Git for Windows' curl while the system curl worked). The token
+  # is passed in memory via WSLENV, as deploy.ps1 does.
+  [switch]$ViaWsl
 )
 $ErrorActionPreference = 'Stop'
 $blob = Join-Path $env:APPDATA 'sheaf\github-token.dpapi'
@@ -34,16 +39,26 @@ try {
   $env:GIT_ASKPASS = (Join-Path $PSScriptRoot 'gh-askpass.sh') -replace '\\', '/'
   $env:GIT_TERMINAL_PROMPT = '0'
   $ErrorActionPreference = 'Continue'   # git writes progress to stderr
-  $gitArgs = @('-C', $Repo, '-c', 'credential.helper=', 'push')
-  if ($DryRun) { $gitArgs += '--dry-run' }
-  $gitArgs += @('origin', $Refspec)
-  $out = (& git @gitArgs 2>&1 | ForEach-Object { $_.ToString() }) -join "`n"
+  if ($ViaWsl) {
+    $wslRepo = ((& wsl.exe -e wslpath -a ($Repo -replace '\\', '/')) | Select-Object -First 1).Trim()
+    $wslAskpass = ((& wsl.exe -e wslpath -a ((Join-Path $PSScriptRoot 'gh-askpass.sh') -replace '\\', '/')) | Select-Object -First 1).Trim()
+    $env:WSLENV = 'SHEAF_GH_TOKEN'
+    $wslArgs = @('-e', 'git', '-C', $wslRepo, '-c', 'credential.helper=', '-c', "core.askPass=$wslAskpass", 'push')
+    if ($DryRun) { $wslArgs += '--dry-run' }
+    $wslArgs += @('origin', $Refspec)
+    $out = (& wsl.exe @wslArgs 2>&1 | ForEach-Object { $_.ToString() }) -join "`n"
+  } else {
+    $gitArgs = @('-C', $Repo, '-c', 'credential.helper=', 'push')
+    if ($DryRun) { $gitArgs += '--dry-run' }
+    $gitArgs += @('origin', $Refspec)
+    $out = (& git @gitArgs 2>&1 | ForEach-Object { $_.ToString() }) -join "`n"
+  }
   $code = $LASTEXITCODE
   Write-Output ($out -replace [regex]::Escape($env:SHEAF_GH_TOKEN), '<redacted>')
 }
 finally {
   [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
-  Remove-Item Env:\SHEAF_GH_TOKEN, Env:\GIT_ASKPASS -ErrorAction SilentlyContinue
+  Remove-Item Env:\SHEAF_GH_TOKEN, Env:\GIT_ASKPASS, Env:\WSLENV -ErrorAction SilentlyContinue
 }
 if ($code -ne 0 -and $out -match 'Invalid username or token|Authentication failed|denied') {
   Write-Output 'The stored GitHub token was rejected. Run gh-token.ps1 -Save with a valid one.'
