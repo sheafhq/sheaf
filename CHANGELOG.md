@@ -59,6 +59,8 @@ a signed 20000 payload and an understated 12900 claim, built through
 `sheaf dispute export` without `--self-check` (the attacker's path); browser
 parity in `test/browser.test.mjs`. All S1 and earlier suites pass unchanged.
 
+Released in `@sheafhq/verify` **0.1.5** (npm) and deployed to `/verify`.
+
 ## 2026-11-17 — SECURITY (S1): recorder no longer manufactures principal signatures
 
 **Bug:** `sheaf local export` signed the mandate, delegation and consent with
