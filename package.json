@@ -31,6 +31,7 @@
     "build:s3-gateway": "npm run build --prefix packages/s3-gateway",
     "test:s3-gateway": "npm test --prefix packages/s3-gateway",
     "test:browser": "npm run build:verify && npm run build:cli && node test/browser.test.mjs",
+    "sim": "node simulation/launch.mjs",
     "deploy": "wrangler deploy",
     "tail": "wrangler tail"
   },
