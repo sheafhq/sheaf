@@ -24,6 +24,14 @@ p strong{color:var(--text);font-weight:600}
 .manifesto p{margin:0 0 14px;color:#b9b7ae;font-size:15px;line-height:1.65}
 .manifesto a{color:var(--acid);font:600 12px/1.4 var(--mono);letter-spacing:.03em;text-decoration:none;border-bottom:1px solid rgba(200,255,106,.35)}
 .manifesto a:hover{border-color:var(--acid)}
+.sim{margin:0 0 28px;max-width:760px;padding:22px 24px;border:1px solid var(--line);background:rgba(255,255,255,.025)}
+.sim h2{margin:0 0 10px;font-size:24px;line-height:1.15;letter-spacing:-.03em;font-weight:600}
+.sim p{margin:0 0 14px;color:#b9b7ae;font-size:15px;line-height:1.65}
+.sim code{font:13px/1.4 var(--mono);color:var(--text);background:rgba(255,255,255,.06);padding:1px 5px}
+.sim pre{margin:0 0 14px;padding:14px 16px;overflow-x:auto;background:#050607;border:1px solid var(--line)}
+.sim pre code{background:none;padding:0;color:var(--acid);font-size:14px}
+.sim a{color:var(--acid);font:600 12px/1.4 var(--mono);letter-spacing:.03em;text-decoration:none;border-bottom:1px solid rgba(200,255,106,.35)}
+.sim a:hover{border-color:var(--acid)}
 .firewall{margin:0 0 30px;max-width:680px;border-left:2px solid var(--acid);padding:14px 16px;background:rgba(200,255,106,.04)}
 .firewall-title{font:10px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--acid);margin-bottom:8px}
 .firewall ul{margin:0;padding-left:18px;color:#c5c3ba;font-size:15px}
@@ -45,6 +53,12 @@ p strong{color:var(--text);font-weight:600}
     roots on <strong>Base L2</strong>. The resulting receipt verifies offline —
     no Sheaf server required.
   </p>
+  <section class="sim" id="simulation">
+    <h2>Watch the Machine Economy Run</h2>
+    <p>Don't just trust the whitepaper. Run the simulation on your own machine. <code>npm install &amp;&amp; npm run sim</code> spins up a local blockchain, a buyer agent, a merchant, and an independent notary. You will watch the firewall block a rogue €200 transaction, allow a valid €100 purchase, and cryptographically verify the entire session.</p>
+    <pre><code>npm install &amp;&amp; npm run sim</code></pre>
+    <a href="https://github.com/sheafhq/sheaf/tree/main/simulation">Read the simulation docs →</a>
+  </section>
   <section class="manifesto">
     <h2>A .sheaf file, or it didn't happen.</h2>
     <p>In a perfect world, you could trust the receipt you get from a vendor or service provider. You wouldn't need to worry about edited logs, mutable databases, or changing model versions. But AI agents act at machine speed, and application logs are designed for debugging, not for legal disputes. Sheaf provides portable, cryptographically verifiable proof of what an agent saw and did. No trust required.</p>
