@@ -15,7 +15,7 @@
   deploy.ps1 -Mode deploy -WslRepo ~/deploy-staging/sheaf
 #>
 param(
-  [ValidateSet('check', 'dry-run', 'deploy')][string]$Mode = 'check',
+  [ValidateSet('check', 'dry-run', 'deploy', 'd1-list', 'd1-apply')][string]$Mode = 'check',
   [string]$WslRepo = '~/deploy-staging/sheaf'
 )
 $ErrorActionPreference = 'Stop'

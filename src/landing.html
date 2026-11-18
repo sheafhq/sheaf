@@ -39,6 +39,23 @@ p strong{color:var(--text);font-weight:600}
 .secondary{color:var(--muted);font:12px/1.4 var(--mono);letter-spacing:.04em;text-decoration:none;border-bottom:1px solid var(--line)}
 .secondary:hover{color:var(--text);border-color:var(--muted)}
 .meta{margin-top:42px;color:var(--muted);font:11px/1.5 var(--mono);letter-spacing:.04em}
+.notice{margin:16px 0 0;max-width:680px;padding:11px 14px;border-left:2px solid var(--acid);background:rgba(200,255,106,.05);color:#c5c3ba;font:13px/1.6 var(--mono)}
+.notice a{color:var(--acid)}
+.waitlist{margin:42px 0 0;max-width:760px;padding:22px 24px;border:1px solid var(--line);background:rgba(255,255,255,.025)}
+.waitlist h2{margin:0 0 10px;font-size:24px;line-height:1.15;letter-spacing:-.03em;font-weight:600}
+.waitlist p{margin:0 0 16px;color:#b9b7ae;font-size:15px;line-height:1.65}
+.waitlist form{display:flex;flex-wrap:wrap;gap:10px;align-items:stretch}
+.waitlist label{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.waitlist input,.waitlist select{min-height:48px;padding:0 14px;background:#050607;color:var(--text);border:1px solid var(--line);font:14px/1 var(--sans)}
+.waitlist input[type=email]{flex:1 1 240px}
+.waitlist select{flex:1 1 220px}
+.waitlist input:focus,.waitlist select:focus{outline:1px solid var(--acid);border-color:var(--acid)}
+.waitlist .button{min-height:48px;padding:0 22px;font-size:13px}
+.waitlist .hp{display:none}
+.waitlist .status{margin:12px 0 0;font:13px/1.5 var(--mono);color:var(--muted)}
+.waitlist .status.ok{color:var(--acid)}
+.waitlist .status.err{color:#ff8a7a}
+.waitlist .fine{margin:12px 0 0;color:var(--muted);font:11px/1.5 var(--mono)}
 @media(max-width:640px){main{padding:40px 22px}h1{font-size:clamp(36px,11vw,56px)}p{font-size:17px}.button{width:100%}}
 </style>
 </head>
@@ -75,7 +92,28 @@ p strong{color:var(--text);font-weight:600}
     <button class="button" id="get-key" type="button">Get an API Key</button>
     <a class="secondary" href="https://github.com/sheafhq/sheaf">View the GitHub Repo ↗</a>
   </div>
+  <p class="notice" id="get-key-msg" hidden></p>
   <p class="meta">Ed25519 · RFC 8785 · Merkle epochs · Base L2 · MIT</p>
+  <section class="waitlist" id="waitlist">
+    <h2>Want to use Sheaf in production?</h2>
+    <p>Sheaf is currently in Developer Preview. The local firewall and verifier are free and open-source forever. If you need managed cloud anchoring, EU AI Act compliance reports, or enterprise dispute bundles, join the waitlist for the Pro tier.</p>
+    <form id="waitlist-form" novalidate>
+      <label for="wl-email">Email</label>
+      <input id="wl-email" name="email" type="email" autocomplete="email" placeholder="you@company.com" required maxlength="254">
+      <label for="wl-use">Use case</label>
+      <select id="wl-use" name="tier_interest" required>
+        <option value="" disabled selected>Use case…</option>
+        <option value="local">Local firewall &amp; verifier</option>
+        <option value="compliance">EU AI Act compliance reports</option>
+        <option value="dispute">Enterprise dispute bundles</option>
+        <option value="other">Something else</option>
+      </select>
+      <input class="hp" name="website" type="text" tabindex="-1" autocomplete="off" aria-hidden="true">
+      <button class="button" id="wl-submit" type="submit">Join the waitlist</button>
+    </form>
+    <p class="status" id="wl-status" role="status" aria-live="polite"></p>
+    <p class="fine">We only use your email to contact you about the Pro tier.</p>
+  </section>
 </main>
 <script>
   document.getElementById("get-key").addEventListener("click", async function () {
@@ -90,7 +128,13 @@ p strong{color:var(--text);font-weight:600}
       });
       var body = await response.json();
       if (body.status === "preview") {
-        alert(body.message);
+        var msg = document.getElementById("get-key-msg");
+        msg.textContent = (body.message || "Paid tiers are coming soon.") + " ";
+        var link = document.createElement("a");
+        link.href = "#waitlist";
+        link.textContent = "Go to the waitlist ↓";
+        msg.appendChild(link);
+        msg.hidden = false;
         return;
       }
       if (body.checkout_url) {
@@ -105,6 +149,56 @@ p strong{color:var(--text);font-weight:600}
     } finally {
       button.disabled = false;
       button.textContent = "Get an API Key";
+    }
+  });
+
+  document.getElementById("waitlist-form").addEventListener("submit", async function (event) {
+    event.preventDefault();
+    var form = this;
+    var status = document.getElementById("wl-status");
+    var submit = document.getElementById("wl-submit");
+    var email = form.email.value.trim();
+    var select = form.tier_interest;
+    status.className = "status";
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
+      status.className = "status err";
+      status.textContent = "Please enter a valid email address.";
+      form.email.focus();
+      return;
+    }
+    if (!select.value) {
+      status.className = "status err";
+      status.textContent = "Please choose a use case.";
+      select.focus();
+      return;
+    }
+    submit.disabled = true;
+    status.textContent = "Sending…";
+    try {
+      var response = await fetch("/v1/lead", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          email: email,
+          use_case: select.options[select.selectedIndex].text,
+          tier_interest: select.value,
+          website: form.website.value,
+        }),
+      });
+      var body = await response.json().catch(function () { return {}; });
+      if (response.ok && body.ok) {
+        form.hidden = true;
+        status.className = "status ok";
+        status.textContent = "Thanks, we'll be in touch.";
+      } else {
+        status.className = "status err";
+        status.textContent = body.error || "Something went wrong. Please try again.";
+      }
+    } catch (err) {
+      status.className = "status err";
+      status.textContent = "Network error. Please try again.";
+    } finally {
+      submit.disabled = false;
     }
   });
 </script>
