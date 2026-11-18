@@ -113,6 +113,17 @@ The browser verifier `dispute-verify.html` in the recorder repo uses the same
 formatter, so CLI and browser output cannot diverge. Offline mode leaves
 `anchor_on_base` null and exits `3` unless `--allow-unconfirmed-anchor` is set.
 
+### Claims are checked, never trusted (S2)
+
+`subject.claims` are the bundle author's statements. The verifier re-derives
+each claim from the signed data it cites (`event.actor`, `event.tool`, or a
+`payload` + `path` on the disputed event's own `tool_arguments`) and fails with
+`CLAIM_MISMATCH` if they differ. The mandate scope (check 8) is evaluated only
+on derived values; the amount and currency must be derivable from the signed
+payload or check 8 fails with `EVIDENCE_GAP`. A merchant given only as the
+author's assertion is not compared and adds the gap `merchant_scope`.
+Supported paths: `$`, `.name`, `["name"]`, `[n]`.
+
 Check 14, `policy_enforced`, is optional. When a bundle includes a
 `sheaf.policy/1` document, the verifier:
 

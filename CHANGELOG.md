@@ -2,6 +2,39 @@
 
 All notable changes to Sheaf packages and the recorder Worker.
 
+## 2026-11-18 — SECURITY (S2): mandate scope is checked on signed data, not on the author's claims
+
+**Bug:** check 8 (`mandate_evidence`) compared the mandate scope with the
+**values written in `subject.claims`**, which the bundle author (normally the
+merchant) chooses. Nothing compared a claim with the signed payload it cites.
+A bundle whose recorder-signed payload charged 20000 against a 15000 cap
+verified with `[8] mandate_evidence ✓` when the claim said 12900, and also when
+the amount claim was simply deleted. Affected: `@sheafhq/verify` ≤ 0.1.4 and
+the `/verify` page.
+
+**Fix (`packages/verify/src/dispute.ts`):**
+
+- Every claim derived from `event.actor`, `event.tool` or a `payload` path is
+  re-derived from the signed data and must equal it, or the bundle fails with
+  `CLAIM_MISMATCH` (reported on check 7, after payloads are bound to the
+  signed `inputs_hash`).
+- Only the **disputed event** and **its own `tool_arguments` payload** are
+  acceptable sources. A claim that points at another event or payload, uses a
+  path that is absent, or uses unsupported JSONPath (only `$`, `.name`,
+  `["name"]`, `[n]`) is unresolved, never guessed.
+- The mandate scope is evaluated only on derived values. The tool and agent
+  come from the signed event itself. Because every mandate caps
+  `amount_max_minor`, the amount **and** currency must be derivable from the
+  signed payload, otherwise check 8 fails with `EVIDENCE_GAP`.
+- A merchant that is only the author's assertion (`derived_from: "case"`) is
+  not compared; the bundle gets the non-fatal gap `merchant_scope`.
+- `sheaf local export` self-checks, so it now refuses to write such bundles.
+
+Tests: `test/s2-claims.test.mjs` (7), including a real local-ledger bundle with
+a signed 20000 payload and an understated 12900 claim, built through
+`sheaf dispute export` without `--self-check` (the attacker's path); browser
+parity in `test/browser.test.mjs`. All S1 and earlier suites pass unchanged.
+
 ## 2026-11-17 — SECURITY (S1): recorder no longer manufactures principal signatures
 
 **Bug:** `sheaf local export` signed the mandate, delegation and consent with
