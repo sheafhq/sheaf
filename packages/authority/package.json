@@ -1,0 +1,14 @@
+{
+  "name": "@sheafhq/authority",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Sheaf Authority Protocol engine (pure: no I/O, no clock). Phase 2: sheaf.identity/1 inceptions, relying-party root pins, inception-only key resolution. Not published yet.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "tsc"
+  },
+  "license": "MIT"
+}

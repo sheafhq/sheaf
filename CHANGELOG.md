@@ -2,6 +2,30 @@
 
 All notable changes to Sheaf packages and the recorder Worker.
 
+## 2026-11-18 — SAP Phase 2: identity (`@sheafhq/authority`, unpublished)
+
+New pure package `packages/authority` (no I/O, no clock). It reuses the
+S1-hardened canonical base64 and strict Ed25519 from `@sheafhq/verify`.
+
+- **`sheaf.identity/1`** inceptions (`schemas/sheaf.identity-1.schema.json`).
+  The identifier `sid:<sha256(JCS(doc − signatures))>` is self-certifying.
+  - **Roots** need `next_key_digest` and a recovery set, and must be signed by
+    every signing key plus ≥ `threshold` recovery keys.
+  - **Non-roots** are signed by their controller and by their own keys.
+- **`sheaf.identity-pins/1`**: the relying party's own list of root sids.
+- **`resolveKey(sid, key_id, at, …)`** handles inceptions only. It walks to a
+  pinned root, verifies root-first, and takes keys only from verified
+  inceptions. Any key event on the path fails closed with
+  `UNVERIFIED_KEY_STATE`. Every success reports
+  `revocation: UNVERIFIED_REVOCATION_STATE`.
+- **Codes:** `UNKNOWN_IDENTITY`, `UNTRUSTED_ROOT`, `KEY_NOT_VALID`,
+  `INVALID_SIGNATURE`, `INVALID_IDENTITY_DOCUMENT`, `INVALID_PIN_FILE`,
+  `UNVERIFIED_KEY_STATE`.
+- **Tests:** `test/identity.test.mjs` (18), including a golden sid
+  cross-checked by an independent implementation.
+
+Nothing in the bundle or verifier consumes identities yet (Phase 3+).
+
 ## 2026-11-18 — SECURITY (S2): mandate scope is checked on signed data, not on the author's claims
 
 **Bug:** check 8 (`mandate_evidence`) compared the mandate scope with the
