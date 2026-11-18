@@ -181,6 +181,37 @@ test("S1 strict Ed25519 in the browser: keyless signature rejected for every mes
   }
 });
 
+// S2: claims are derived from signed data in the browser build too.
+test("S2 claim mismatch and evidence gap: browser output == CLI output", async () => {
+  const { mkdirSync, rmSync, writeFileSync } = await import("node:fs");
+  const { computeDisputeBundleId } = await import("../packages/verify/dist/index.js");
+  const dir = "test/tmp-s2-browser";
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(dir, { recursive: true });
+  const variants = [
+    ["understated", (b) => { b.subject.claims.amount_minor.value = 1; }, /^code: CLAIM_MISMATCH$/m],
+    ["amount-deleted", (b) => { delete b.subject.claims.amount_minor; }, /^code: EVIDENCE_GAP$/m],
+  ];
+  const page = await context.newPage();
+  try {
+    for (const [name, mutate, expected] of variants) {
+      const bundle = JSON.parse(readFileSync(BUNDLE, "utf8"));
+      mutate(bundle);
+      bundle.bundle_id = await computeDisputeBundleId(bundle);
+      const path = `${dir}/${name}.sheaf`;
+      writeFileSync(path, JSON.stringify(bundle, null, 2));
+      const run = spawnSync(process.execPath, ["dist-cli/cli.js", "dispute", "verify", path, "--offline"], { encoding: "utf8" });
+      assert.match(run.stdout, expected, `${name}: ${run.stdout}${run.stderr}`);
+      await page.goto(pathToFileURL(HTML).href + "?offline=1");
+      const browserText = await dropBundle(page, JSON.stringify(bundle));
+      assert.equal(browserText, run.stdout, name);
+    }
+  } finally {
+    await page.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("S1-6 walking bundle in the browser: unauthenticated, no warnings", async () => {
   const page = await context.newPage();
   try {

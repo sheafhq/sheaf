@@ -35,6 +35,7 @@ import type {
 
 export const DISPUTE_BUNDLE_SCHEMA = "sheaf.dispute-bundle/1";
 
+
 export const DISPUTE_CHECK_NAMES = [
   "schema_supported",
   "bundle_id_matches",
@@ -456,9 +457,161 @@ async function localDisclosureCheck(
   return { ok: true };
 }
 
-function claimValue(bundle: AnyBundle, key: string): string | number | null {
+// ---------------------------------------------------------------------------
+// S2: subject.claims are the bundle author's statements. They are NEVER used
+// as facts. A claim is checked against the signed data it cites, and the
+// mandate scope is evaluated only on values derived from that signed data.
+// ---------------------------------------------------------------------------
+
+type ClaimResolution =
+  | { status: "resolved"; value: unknown; source: string }
+  | { status: "unresolved"; reason: string };
+
+/** Event fields a claim may be derived from (on the disputed event only). */
+const CLAIM_EVENT_FIELDS = new Set(["actor", "tool"]);
+
+/**
+ * Minimal JSONPath: `$`, `.name`, `["name"]`, `[n]`. Anything else is
+ * unresolvable (never guessed). Own properties only.
+ */
+function readJsonPath(
+  content: unknown,
+  path: unknown,
+): { found: true; value: unknown } | { found: false } {
+  if (typeof path !== "string" || !path.startsWith("$")) return { found: false };
+  const token = /\.([A-Za-z_][A-Za-z0-9_]*)|\["((?:[^"\\]|\\.)*)"\]|\[(0|[1-9][0-9]*)\]/y;
+  let i = 1;
+  let current: unknown = content;
+  while (i < path.length) {
+    token.lastIndex = i;
+    const m = token.exec(path);
+    if (!m) return { found: false };
+    i = token.lastIndex;
+    if (m[3] !== undefined) {
+      if (!Array.isArray(current)) return { found: false };
+      const idx = Number(m[3]);
+      if (idx >= current.length) return { found: false };
+      current = current[idx];
+    } else {
+      const key = m[1] ?? JSON.parse(`"${m[2]}"`);
+      if (
+        current === null ||
+        typeof current !== "object" ||
+        Array.isArray(current) ||
+        !Object.prototype.hasOwnProperty.call(current, key)
+      ) {
+        return { found: false };
+      }
+      current = (current as Record<string, unknown>)[key];
+    }
+  }
+  return { found: true, value: current };
+}
+
+function disputedSeqOf(bundle: AnyBundle): any {
+  return bundle.subject?.disputed_event_seqs?.[0] ?? bundle.subject?.from_seq;
+}
+
+/**
+ * Derive a claim's value from the signed data it cites. Only the DISPUTED
+ * event and that event's own `tool_arguments` payload are acceptable sources:
+ * a claim pointing at another event or payload is unresolved, so an author
+ * cannot borrow a smaller number from elsewhere in the bundle. Payload content
+ * is bound to the recorder-signed `inputs_hash` by check 7, which runs first.
+ */
+function resolveClaim(bundle: AnyBundle, key: string): ClaimResolution {
   const claim = bundle.subject?.claims?.[key];
-  return claim && typeof claim.value !== "undefined" ? claim.value : null;
+  if (!claim || typeof claim !== "object") {
+    return { status: "unresolved", reason: `subject.claims.${key} is absent` };
+  }
+  const seq = disputedSeqOf(bundle);
+  const disputed = findDisclosure(bundle, { chain_id: bundle.subject?.chain_id, seq });
+  if (!disputed) {
+    return { status: "unresolved", reason: "the disputed event is not disclosed" };
+  }
+  const from = claim.derived_from;
+  if (typeof from === "string" && from.startsWith("event.")) {
+    const field = from.slice("event.".length);
+    if (!CLAIM_EVENT_FIELDS.has(field)) {
+      return { status: "unresolved", reason: `subject.claims.${key} cites unsupported field ${from}` };
+    }
+    if (claim.ref !== undefined && claim.ref !== `seq:${seq}`) {
+      return {
+        status: "unresolved",
+        reason: `subject.claims.${key} cites ${String(claim.ref)}, not the disputed event seq:${String(seq)}`,
+      };
+    }
+    const value = (disputed.envelope.event as Record<string, unknown>)[field];
+    if (value === undefined) {
+      return { status: "unresolved", reason: `the disputed event has no ${field}` };
+    }
+    return { status: "resolved", value, source: `event.${field} of seq ${String(seq)}` };
+  }
+  if (from === "payload") {
+    const payload = (Array.isArray(bundle.payloads) ? bundle.payloads : []).find(
+      (p: any) => p?.id === claim.ref,
+    );
+    if (!payload) {
+      return { status: "unresolved", reason: `subject.claims.${key} cites payload ${String(claim.ref)}, which is not disclosed` };
+    }
+    if (
+      payload.kind !== "tool_arguments" ||
+      payload.event_ref?.seq !== seq ||
+      (payload.event_ref?.chain_id !== undefined && payload.event_ref.chain_id !== bundle.subject?.chain_id)
+    ) {
+      return {
+        status: "unresolved",
+        reason: `subject.claims.${key} cites payload ${String(claim.ref)}, which is not the disputed event's tool_arguments`,
+      };
+    }
+    const read = readJsonPath(payload.content, claim.path);
+    if (!read.found) {
+      return {
+        status: "unresolved",
+        reason: `path ${String(claim.path)} is not present in signed payload ${String(claim.ref)}`,
+      };
+    }
+    return { status: "resolved", value: read.value, source: `payload ${String(claim.ref)} ${String(claim.path)}` };
+  }
+  return {
+    status: "unresolved",
+    reason: `subject.claims.${key} is derived from "${String(from)}", which is the bundle author's assertion, not signed data`,
+  };
+}
+
+function sameJsonValue(a: unknown, b: unknown): boolean {
+  try {
+    return canonicalize(a as any) === canonicalize(b as any);
+  } catch {
+    return false;
+  }
+}
+
+function showValue(value: unknown): string {
+  try {
+    return canonicalize(value as any);
+  } catch {
+    return String(value);
+  }
+}
+
+/** Every claim that can be derived must equal its signed source. */
+function verifyClaims(bundle: AnyBundle): { ok: true } | { ok: false; reason: string } {
+  const claims = bundle.subject?.claims;
+  if (!claims || typeof claims !== "object") return { ok: true };
+  for (const key of Object.keys(claims).sort()) {
+    const r = resolveClaim(bundle, key);
+    if (r.status !== "resolved") continue;
+    if (!sameJsonValue(claims[key]?.value, r.value)) {
+      return {
+        ok: false,
+        reason:
+          `subject.claims.${key} states ${showValue(claims[key]?.value)} but the signed ` +
+          `${r.source} is ${showValue(r.value)}`,
+      };
+    }
+  }
+  return { ok: true };
 }
 
 function evidenceSection(
@@ -575,43 +728,82 @@ async function verifySectionDocument(
   return { ok: true, hash: result.document_hash };
 }
 
-function mandateScopeCovers(bundle: AnyBundle, document: any): boolean {
-  const disputedSeq =
-    bundle.subject?.disputed_event_seqs?.[0] ?? bundle.subject?.from_seq;
-  const disputed = findDisclosure(bundle, {
-    chain_id: bundle.subject.chain_id,
-    seq: disputedSeq,
-  });
-  if (!disputed) return false;
-  if (document.agent?.id !== disputed.envelope.event.actor) return false;
+type ScopeResult =
+  | { ok: true; merchantVerified: boolean }
+  | { ok: false; code: "EVIDENCE_GAP" | "MANDATE_SCOPE_MISMATCH"; reason: string };
 
-  const merchant = claimValue(bundle, "merchant");
-  if (merchant !== null && String(merchant).toLowerCase() !== String(document.scope?.merchant ?? "").toLowerCase()) {
-    return false;
+/**
+ * S2: the mandate scope is evaluated ONLY on values derived from signed data
+ * (the disputed event and its own tool_arguments payload), never on the
+ * values written in subject.claims.
+ *
+ *  - tool, agent and time come from the signed disputed event itself.
+ *  - The scope caps the amount (amount_max_minor is required by
+ *    sheaf.mandate-document/1), so amount_minor and currency MUST be derivable
+ *    from the signed payload, or the check fails with EVIDENCE_GAP. A cap in
+ *    an unknown currency is meaningless, hence currency is required too.
+ *  - merchant is compared when derivable. When it is not (e.g. a claim
+ *    "derived_from": "case"), it is not checked and the bundle gets the
+ *    non-fatal evidence gap `merchant_scope`.
+ */
+function mandateScopeCovers(bundle: AnyBundle, document: any): ScopeResult {
+  const mismatch = (reason: string): ScopeResult => ({ ok: false, code: "MANDATE_SCOPE_MISMATCH", reason });
+  const gap = (reason: string): ScopeResult => ({ ok: false, code: "EVIDENCE_GAP", reason });
+  const disputed = findDisclosure(bundle, {
+    chain_id: bundle.subject?.chain_id,
+    seq: disputedSeqOf(bundle),
+  });
+  if (!disputed) return gap("the disputed event is not disclosed");
+  const event = disputed.envelope.event;
+  if (document.agent?.id !== event.actor) {
+    return mismatch("mandate agent.id does not equal the disputed event's actor");
   }
-  const tool = claimValue(bundle, "tool");
-  if (tool !== null && !(document.scope?.tools ?? []).includes(String(tool))) {
-    return false;
+  if (!(document.scope?.tools ?? []).includes(String(event.tool))) {
+    return mismatch(`the disputed event's tool ${String(event.tool)} is not in the mandate scope`);
   }
-  const amount = claimValue(bundle, "amount_minor");
+
+  const amount = resolveClaim(bundle, "amount_minor");
+  if (amount.status !== "resolved") {
+    return gap(
+      `the mandate caps amount_max_minor but the amount is not derivable from the disputed event's signed payload (${amount.reason})`,
+    );
+  }
+  const currency = resolveClaim(bundle, "currency");
+  if (currency.status !== "resolved") {
+    return gap(
+      `the mandate cap is in ${String(document.scope?.currency)} but the currency is not derivable from the disputed event's signed payload (${currency.reason})`,
+    );
+  }
+  if (!Number.isInteger(amount.value)) {
+    return mismatch(`signed amount ${showValue(amount.value)} is not an integer number of minor units`);
+  }
+  if ((amount.value as number) > Number(document.scope?.amount_max_minor)) {
+    return mismatch(
+      `signed amount ${String(amount.value)} exceeds the mandate cap amount_max_minor ${String(document.scope?.amount_max_minor)}`,
+    );
+  }
+  if (String(currency.value) !== String(document.scope?.currency)) {
+    return mismatch(`signed currency ${showValue(currency.value)} is not the mandate currency ${String(document.scope?.currency)}`);
+  }
+
+  const merchant = resolveClaim(bundle, "merchant");
   if (
-    amount !== null &&
-    (!Number.isInteger(amount) ||
-      (amount as number) > Number(document.scope?.amount_max_minor))
+    merchant.status === "resolved" &&
+    String(merchant.value).toLowerCase() !== String(document.scope?.merchant ?? "").toLowerCase()
   ) {
-    return false;
+    return mismatch(`signed merchant ${showValue(merchant.value)} is not the mandate merchant`);
   }
-  const currency = claimValue(bundle, "currency");
-  if (currency !== null && String(currency) !== String(document.scope?.currency)) {
-    return false;
-  }
-  const ts = Date.parse(disputed.envelope.event.ts);
+
+  const ts = Date.parse(event.ts);
   const from = Date.parse(document.scope?.valid_from);
   const until = Date.parse(document.scope?.valid_until);
   if (!Number.isFinite(ts) || !Number.isFinite(from) || !Number.isFinite(until)) {
-    return false;
+    return mismatch("the event time or the mandate validity window is invalid");
   }
-  return ts >= from && ts <= until;
+  if (ts < from || ts > until) {
+    return mismatch("the disputed event is outside the mandate validity window");
+  }
+  return { ok: true, merchantVerified: merchant.status === "resolved" };
 }
 
 function gapsFromEvidence(
@@ -1058,6 +1250,15 @@ export async function verifyDisputeBundle(
     }
     check(checks, 7, true);
   }
+  // S2: a claim that can be derived from signed data must equal it. Runs after
+  // the payload hashes are bound to the signed events, and even when no
+  // payloads are disclosed (event-derived claims are still checkable).
+  {
+    const claimCheck = verifyClaims(bundle);
+    if (!claimCheck.ok) {
+      return fail(7, "CLAIM_MISMATCH", claimCheck.reason);
+    }
+  }
 
   // 8: mandate
   if (mandateSection.error) {
@@ -1082,13 +1283,11 @@ export async function verifyDisputeBundle(
         "mandate event actor does not equal document principal.id",
       );
     }
-    if (!mandateScopeCovers(bundle, mandateSection.document)) {
-      return fail(
-        8,
-        "MANDATE_SCOPE_MISMATCH",
-        "mandate scope does not cover the disputed event and subject claims",
-      );
+    const scope = mandateScopeCovers(bundle, mandateSection.document);
+    if (!scope.ok) {
+      return fail(8, scope.code, scope.reason);
     }
+    if (!scope.merchantVerified) gaps.add("merchant_scope");
     check(checks, 8, true);
     if (recorderSigned(mandateSection.document, recorderKeys)) {
       warnRecorderSigned("mandate");
