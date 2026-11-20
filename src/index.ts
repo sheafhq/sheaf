@@ -25,7 +25,7 @@ import DISPUTE_VERIFY_HTML from "../dispute-verify.html";
 import SAMPLE_BUNDLE from "../test/fixtures/dispute-walking/bundle.sheaf";
 import FIREWALL_BUNDLE from "../test/fixtures/dispute-walking/bundle-policy.sheaf";
 import LANDING_HTML from "./landing.html";
-import WHITEPAPER_HTML from "./whitepaper.html";
+import HOW_IT_WORKS_HTML from "./how-it-works.html";
 import FAVICON_SVG from "./favicon.svg";
 import LLMS_TXT from "../llms.txt";
 import {
@@ -319,13 +319,17 @@ app.get("/", (c) => {
   return c.body(LANDING_HTML);
 });
 
-app.get("/whitepaper", (c) => {
+app.get("/how-it-works", (c) => {
   c.header("Content-Type", "text/html; charset=utf-8");
   c.header("Cache-Control", "public, max-age=300, s-maxage=300");
-  return c.body(WHITEPAPER_HTML);
+  return c.body(HOW_IT_WORKS_HTML);
 });
 
-// Site icon, referenced by <link rel="icon"> on the landing page, whitepaper
+// The document was called the "Technical Whitepaper" until 2026-11-20.
+// Keep old links working.
+app.get("/whitepaper", (c) => c.redirect("/how-it-works", 301));
+
+// Site icon, referenced by <link rel="icon"> on the landing page, technical overview
 // and verifier. One day of caching: browsers re-check favicons rarely anyway.
 app.get("/favicon.svg", (c) => {
   c.header("Content-Type", "image/svg+xml");
@@ -368,7 +372,7 @@ app.get("/manifest", (c) => {
         { pattern: "GET /chains/{chain_id}/head", example: `${origin}/chains/smoke-test-1/head`, note: "current head of a chain" },
         { pattern: "GET /epoch/{epoch_id}/proof/{chain_id}/{seq}", example: `${origin}/epoch/0/proof/smoke-test-1/0`, note: "Merkle inclusion proof" },
         { pattern: "GET /.well-known/sheaf-public-key", example: `${origin}/.well-known/sheaf-public-key`, note: "issuer public keys" },
-        { pattern: "GET /whitepaper", example: `${origin}/whitepaper`, note: "technical whitepaper (HTML)" },
+        { pattern: "GET /how-it-works", example: `${origin}/how-it-works`, note: "technical overview: architecture, verification, authorisation, limitations (HTML; /whitepaper redirects here)" },
         { pattern: "GET /llms.txt", example: `${origin}/llms.txt`, note: "LLM-optimized install and usage guide" },
         { pattern: "POST /v1/checkout", example: `${origin}/v1/checkout`, note: "Stripe Checkout for Sheaf Pro (Developer Preview: returns a waitlist pointer)" },
         { pattern: "POST /v1/lead", example: `${origin}/v1/lead`, note: "join the Pro waitlist: {email, use_case, tier_interest: local|compliance|dispute|other}" },

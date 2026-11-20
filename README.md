@@ -195,7 +195,7 @@ Landing page: [https://sheafhq.io](https://sheafhq.io)
 
 S3 gateway: [`packages/s3-gateway`](./packages/s3-gateway) — PUT proxy that hashes the body and records an `s3.put` receipt for every successful write.
 
-Technical whitepaper: [https://sheafhq.io/whitepaper](https://sheafhq.io/whitepaper)
+How Sheaf works (technical overview, including limitations): [https://sheafhq.io/how-it-works](https://sheafhq.io/how-it-works)
 
 Live verifier: [https://sheafhq.io/verify](https://sheafhq.io/verify)
 

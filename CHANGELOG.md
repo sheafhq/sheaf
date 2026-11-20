@@ -2,6 +2,39 @@
 
 All notable changes to Sheaf packages and the recorder Worker.
 
+## 2026-11-20 — "Technical Whitepaper" becomes "How Sheaf Works"
+
+The document is now a technical overview at `/how-it-works`. `/whitepaper`
+returns a 301 redirect to it.
+
+- **Name.** The document is an architecture overview, not a specification or
+  a research paper. "Whitepaper" also reads as a crypto token pitch, and Sheaf
+  has no token.
+- **Brought up to date with what shipped since 13 November:**
+  - Authorisation tiers. A recorder signature is never treated as the
+    principal's authorisation. Explains why the samples show
+    `unauthenticated`.
+  - Claims are re-derived from signed data (S2).
+  - Strict Ed25519.
+  - The closed v1 bundle format.
+  - Release status: the npm firewall is 0.3.0 (`sheaf-policy/1`); 0.4.0
+    (`sheaf.policy/1`) is unpublished.
+  - How to run the simulation, and what it needs.
+- **New Limitations section.** Sheaf does not prove:
+  - the actor's identity;
+  - the client-supplied timestamp;
+  - completeness beyond a session;
+  - that the recorder showed everyone the same history (split views);
+  - real-world execution;
+  - the trustworthiness of the browser verifier's delivery.
+- **Corrected claims:**
+  - Card networks have no binding agent-specific dispute rule.
+  - VOLT is "Verifiable Operations Ledger and Trace". The VOLT and WARD
+    Internet-Drafts are individual submissions; there is no IETF draft called
+    "AHE" or "NHE".
+  - EU AI Act Article 12 is worded as in the Act.
+  - The agent signature is not treated as evidence of identity.
+
 ## 2026-11-18 — SAP Phase 2: identity (`@sheafhq/authority`, unpublished)
 
 New pure package `packages/authority` (no I/O, no clock). It reuses the
