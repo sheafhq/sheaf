@@ -31,8 +31,9 @@ had already gone to npm from a copy that didn't match production.
 4. **Deploy only from a clean checkout of pushed `main`:**
    `git status` must be empty and `HEAD` must equal `origin/main`.
 5. **Before any `wrangler deploy`, diff production against your tree.** Fetch
-   `https://api.sheafhq.io/`, `/whitepaper` and `/verify` and compare them with
-   `src/landing.html`, `src/whitepaper.html` and `dispute-verify.html`. If live
+   `https://api.sheafhq.io/`, `/how-it-works` and `/verify` and compare them with
+   `src/landing.html`, `src/how-it-works.html` and `dispute-verify.html`
+   (`/whitepaper` 301-redirects to `/how-it-works` since 2026-11-20). If live
    has something your tree doesn't, **do not deploy**: someone deployed from
    elsewhere. Find that source and ask the human.
 6. **Publish npm packages only from pushed `main`,** after the release gate

@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How Sheaf Works — Technical Overview</title>
+<meta name="description" content="How Sheaf records, signs, chains and anchors AI agent tool calls, what its verifier checks, and what it cannot prove.">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<style>
+:root{--bg:#0a0b0d;--panel:#101216;--line:#252830;--line-2:#343842;--text:#ecebe4;--body:#c5c3ba;--muted:#8d9098;--acid:#c8ff6a;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;--sans:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+*{box-sizing:border-box}
+html{background:var(--bg);scroll-behavior:smooth}
+body{margin:0;color:var(--text);background:linear-gradient(rgba(255,255,255,.02) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.02) 1px,transparent 1px),var(--bg);background-size:64px 64px;font:17px/1.75 var(--sans);-webkit-font-smoothing:antialiased}
+a{color:var(--acid)}
+.wrap{max-width:860px;margin:0 auto;padding:0 28px}
+.top{border-bottom:1px solid var(--line);background:rgba(10,11,13,.92);backdrop-filter:blur(8px);position:sticky;top:0;z-index:5}
+.top .wrap{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:58px;font:11px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.top a{color:var(--muted);text-decoration:none}
+.top a:hover{color:var(--text)}
+header{padding:72px 0 46px;border-bottom:1px solid var(--line)}
+.kicker{font:11px/1.3 var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--acid)}
+h1{margin:18px 0 20px;max-width:800px;font-size:clamp(38px,6vw,66px);line-height:1.02;letter-spacing:-.045em;font-weight:650}
+.byline{color:var(--muted);font:11px/1.7 var(--mono);letter-spacing:.03em}
+.abstract{margin:30px 0 0;padding:20px 22px;border:1px solid var(--line);border-left:2px solid var(--acid);background:var(--panel)}
+.abstract .label{font:10px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--acid);margin-bottom:10px}
+.abstract p{margin:0;color:var(--body);font-size:16px;line-height:1.7}
+.toc{margin:22px 0 0;color:var(--muted);font:12px/1.9 var(--mono)}
+.toc a{color:var(--muted);text-decoration:none;border-bottom:1px solid var(--line-2)}
+.toc a:hover{color:var(--text)}
+main{padding:18px 0 0}
+section{padding:46px 0;border-bottom:1px solid var(--line)}
+h2{margin:0 0 18px;font-size:28px;line-height:1.15;letter-spacing:-.03em;font-weight:600}
+h2 .num{display:inline-block;min-width:46px;color:var(--acid);font:11px/1 var(--mono);letter-spacing:.1em;vertical-align:middle}
+h3{margin:28px 0 8px;font-size:17px;line-height:1.3;letter-spacing:-.01em;font-weight:600}
+p{margin:0 0 16px;color:var(--body)}
+p strong,li strong{color:var(--text);font-weight:600}
+ul{margin:0 0 16px;padding-left:20px;color:var(--body)}
+li{margin:0 0 8px}
+li::marker{color:var(--acid)}
+code{padding:1px 5px;border:1px solid var(--line-2);background:var(--panel);color:var(--text);font:12px/1.5 var(--mono)}
+pre{margin:0 0 16px;padding:14px 16px;overflow-x:auto;border:1px solid var(--line);background:#050607}
+pre code{padding:0;border:0;background:none;color:var(--acid);font-size:13px}
+.note{margin:22px 0;padding:14px 16px;border-left:2px solid var(--line-2);background:var(--panel);color:var(--muted);font:12px/1.7 var(--mono)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--line);border:1px solid var(--line);margin:22px 0}
+.cell{background:var(--panel);padding:18px}
+.cell h3{margin:0 0 6px;font-size:15px}
+.cell p{margin:0;color:var(--muted);font-size:14px;line-height:1.6}
+table{width:100%;border-collapse:collapse;margin:0 0 18px;font-size:14px}
+th,td{text-align:left;vertical-align:top;padding:9px 10px;border-bottom:1px solid var(--line);color:var(--body)}
+th{color:var(--muted);font:10px/1.4 var(--mono);letter-spacing:.1em;text-transform:uppercase}
+td code{white-space:nowrap}
+.back{display:inline-block;margin:26px 0 0;font:11px/1.4 var(--mono);letter-spacing:.06em;text-transform:uppercase;text-decoration:none;border-bottom:1px solid var(--line-2);padding-bottom:4px}
+.back:hover{border-color:var(--acid)}
+footer{padding:34px 0 54px;color:var(--muted);font:11px/1.8 var(--mono)}
+footer .wrap{display:flex;flex-wrap:wrap;justify-content:space-between;gap:16px}
+footer a{color:var(--muted);text-decoration:none;border-bottom:1px solid var(--line-2)}
+footer a:hover{color:var(--text)}
+@media(max-width:700px){header{padding:48px 0 34px}.wrap{padding:0 22px}h1{font-size:clamp(34px,10vw,50px)}.grid{grid-template-columns:1fr}h2{font-size:24px}h2 .num{display:block;margin-bottom:8px}td code{white-space:normal}}
+@media print{body{background:#fff;color:#111}.top{display:none}section{break-inside:avoid}.abstract,.cell,.note,pre{background:#fff;color:#111}p,li,td{color:#222}a{color:#111}}
+</style>
+</head>
+<body>
+<div class="top">
+  <div class="wrap"><a href="/">← Back to Home</a><span>Sheaf / How Sheaf Works</span></div>
+</div>
+
+<header>
+  <div class="wrap">
+    <div class="kicker">Technical Overview · Developer Preview</div>
+    <h1>How Sheaf Works: Verifiable Evidence for Autonomous Agents</h1>
+    <div class="byline">Updated 20 November 2026 · Sheaf · sheafhq.io · describes @sheafhq/verify 0.1.5</div>
+    <div class="abstract">
+      <div class="label">Summary</div>
+      <p>AI agents now initiate payments, change records, and call tools across third-party systems at machine speed. The evidence available when those actions are disputed is usually an application log: mutable, debugging-oriented, and controlled by the party that owns the system. Sheaf closes that gap with an out-of-process recorder that captures MCP tool calls at the boundary, signs them with Ed25519 keys the agent never holds, links them into a hash chain, and anchors Merkle epoch roots on Base L2. A portable <code>.sheaf</code> bundle can then prove a specific action to an auditor, issuer, or counterparty through selective disclosure — without exposing the rest of the chain and without trusting Sheaf's servers. This document also states what Sheaf does <em>not</em> prove (<a href="#limitations">section 07</a>).</p>
+    </div>
+    <div class="toc">
+      <a href="#trust-gap">01 Trust gap</a> · <a href="#architecture">02 Architecture</a> · <a href="#disclosure">03 Selective disclosure</a> · <a href="#verification">04 Verification</a> · <a href="#authorisation">05 Authorisation</a> · <a href="#simulation">06 Run it yourself</a> · <a href="#limitations">07 Limitations</a> · <a href="#standards">08 Standards</a>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section id="trust-gap">
+    <div class="wrap">
+      <h2><span class="num">01</span>The Trust Gap</h2>
+      <p>Application logs are built to help engineers debug software. They are not built to survive an adversarial review. A log line can be edited at the source, rewritten in a database, dropped by a retention policy, or reconstructed from a different model version. Even an honest operator usually cannot prove that the log it presents is the same log its systems produced at execution time.</p>
+      <p>Observability platforms improve search and retention, but they preserve the same trust model: the operator owns the pipeline, the timestamps, and the storage. An auditor who receives a screenshot or a CSV export is still asked to trust the party whose conduct is in question. For high-value disputes, that is not evidence. It is a narrative with better formatting.</p>
+      <p>Regulation and payments are moving the same way. <strong>EU AI Act Article 12</strong> requires high-risk AI systems to technically allow the automatic recording of events (logs) over their lifetime. In card payments, agent-initiated transactions are still disputed under the existing chargeback reason codes; the networks have not published a binding agent-specific dispute rule. That puts the burden on evidence: a merchant increasingly has to show what the customer authorised the agent to do, not merely that a checkout session completed. A mutable order log answers neither question.</p>
+      <div class="note">The dispute is no longer “did the transaction complete?” It is “was this agent authorised to perform this action, for this principal, at this moment?” That question requires evidence that can be verified independently of the operator.</div>
+    </div>
+  </section>
+
+  <section id="architecture">
+    <div class="wrap">
+      <h2><span class="num">02</span>Architecture</h2>
+      <p>Sheaf records execution, not intention alone. The recorder sits outside the agent process and observes the same JSON-RPC messages the agent exchanges with an MCP server. Each event is signed, chained, batched, and anchored. The result is a receipt that another party can verify with a pinned public key and a Base RPC.</p>
+
+      <h3>Interception</h3>
+      <p>A transparent MCP proxy wraps the underlying server. When the agent sends <code>tools/call</code>, the proxy captures the tool name, arguments, and the result returned by the server. It also captures <code>resources/read</code> and <code>sampling/createMessage</code> where configured. Argument and result payloads are hashed; raw payloads are not sent to the recorder by default. The interception point is the boundary itself, not a vendor API and not the agent's own instrumentation.</p>
+      <p>For runtime enforcement, the same boundary evaluates a policy document before the call is forwarded. An <code>ALLOW</code> is recorded and forwarded. A <code>BLOCK</code> or <code>REQUIRE_APPROVAL</code> is recorded with <code>result: "blocked"</code> and returned to the agent as a structured JSON-RPC policy error; the underlying server never sees the call. The audit trail therefore contains both the actions that ran and the actions that were stopped. <code>REQUIRE_APPROVAL</code> currently blocks; a signed-approval flow is not built yet.</p>
+      <div class="note">Release status: the published <code>@sheafhq/mcp-recorder</code> (0.3.0 on npm) enforces the <code>sheaf-policy/1</code> format and is what the reference simulation runs. The richer <code>sheaf.policy/1</code> firewall with a local signing ledger is in the repository (<code>packages/mcp-recorder</code> 0.4.0) and is not yet published.</div>
+
+      <h3>Signing</h3>
+      <p>The recorder co-signs each event with Ed25519. The agent never holds the private key, and the wrapped MCP server does not need to be modified. The signed payload is the RFC 8785 (JCS) canonicalization of <code>{v, event, chain}</code>, which makes the signature deterministic across languages and platforms. The recorder's signature establishes that the event was observed and chained by the recorder whose key is pinned in the verifier. It says nothing about who the agent is: the envelope's <code>signatures.actor</code> field is not part of the signed payload or the chained hash, and verifiers ignore it.</p>
+
+      <h3>Hash-Chaining &amp; Merkle Batching</h3>
+      <p>Every event carries a chain identifier and a sequence number. Its <code>prev_hash</code> is the hash of the previous envelope, excluding signatures. Changing an earlier event changes every later <code>prev_hash</code>, so an edit cannot be hidden by rewriting one record. The recorder periodically batches the events it has received into an epoch and computes a Merkle root over the event leaves. The root commits to the whole batch with a single 32-byte value; any individual event can later be proven against it with a logarithmic-size path.</p>
+
+      <h3>Anchoring</h3>
+      <p>The epoch root is written to Base L2 in the anchor transaction calldata. The transaction's block is the upper time bound: the root, and every event under it, existed by that block, and no one can change those events afterwards without the proof failing. Verification pins the expected anchorer address and network, reads the transaction from a Base RPC, and checks that the calldata root matches the Merkle root in the bundle. Sheaf's database is not part of the verification path.</p>
+
+      <div class="grid">
+        <div class="cell"><h3>What the chain proves</h3><p>Ordering and integrity within a chain, and that the pinned recorder signed each event.</p></div>
+        <div class="cell"><h3>What the anchor proves</h3><p>The epoch root, and so each event under it, existed on a public chain by a specific block, independent of Sheaf's servers.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="disclosure">
+    <div class="wrap">
+      <h2><span class="num">03</span>Selective Disclosure</h2>
+      <p>A merchant should not have to hand over an entire agent history to prove one transaction. Sheaf uses Merkle-path disclosure: the bundle contains the selected event's signed envelope, its leaf hash, its Merkle inclusion path, and the epoch root. The verifier recomputes the root from the leaf and sibling hashes, then checks the root against the Base anchor. The rest of the epoch stays private.</p>
+      <p>For a contiguous range, the bundle also includes the events immediately before and after the window. These boundary references prove that the disclosed set is a contiguous slice of the chain and that no event was silently omitted from the middle. Payloads are separately hash-bound: the bundle can include the arguments or result needed to evaluate a claim, or only their hashes when the dispute does not require the raw content.</p>
+      <p>The result is a portable artifact that supports a narrow claim — “this agent called this tool with these arguments and received this result” — without exposing unrelated customers, tools, or sessions. The same primitive carries the Dispute Bundle's mandate, delegation, consent, execution, and policy evidence (<code>sheaf.dispute-bundle/1</code>, 14 checks).</p>
+    </div>
+  </section>
+
+  <section id="verification">
+    <div class="wrap">
+      <h2><span class="num">04</span>Verification</h2>
+      <p>Verification is local and zero-dependency. The browser verifier at <a href="/verify">/verify</a> is a single HTML file with the verification code inlined; it does not load a CDN, a framework, or a Sheaf API. The Node verifier, <code>@sheafhq/verify</code>, exposes the same checks as a library and CLI, and its output is byte-identical to the browser's. In offline mode it validates the hash chain, signatures, Merkle paths, bundle hash, payload hashes, and evidence documents without a network request. In online mode it additionally reads the anchor transaction from a Base RPC and confirms the root, anchorer, and block.</p>
+      <p>Trust is pinned, not discovered. The verifier ships with the recorder public keys and the authorised Base anchorers for its release. A bundle cannot introduce a new key by claiming a URL; the verifier never fetches <code>public_key_url</code>. Rotating a recorder key or anchorer therefore requires a new verifier release, and an old verifier fails closed on a bundle signed by a key it does not know. The <code>--trust &lt;path&gt;</code> option exists for tests and local ledgers, not as a production rotation mechanism.</p>
+      <p>Offline mode proves integrity, not anchor presence. The <code>anchor_on_base</code> check is reported as unconfirmed, and the CLI exits non-zero unless the caller explicitly accepts an unconfirmed anchor. Online mode is the stronger claim: the record was anchored on Base and has not been altered since.</p>
+
+      <h3>The verifier does not take the bundle's word for anything</h3>
+      <ul>
+        <li><strong>Claims are re-derived from signed data.</strong> A bundle states what is in dispute (amount, currency, merchant, tool) in <code>subject.claims</code>. Those are the author's statements. The verifier re-reads each value from the signed event or the payload it cites and fails with <code>CLAIM_MISMATCH</code> if they differ. The mandate's scope is checked only against those derived values; if the mandate caps an amount and the amount is not in the signed payload, the result is <code>EVIDENCE_GAP</code>.</li>
+        <li><strong>Strict Ed25519.</strong> Every signature is checked against a strict profile before the platform's own Ed25519 runs: canonical encodings, no small-order keys or nonce points, and a reduced scalar. Native WebCrypto in current Node and Chromium accepts small-order public keys, for which a "signature" can be produced without any private key; the strict profile rejects them.</li>
+        <li><strong>The format is closed.</strong> A <code>sheaf.dispute-bundle/1</code> with any unknown top-level field fails, so content a verifier does not understand can never be silently ignored.</li>
+      </ul>
+      <div class="note">Pinned trust is a feature. It converts key rotation into an explicit software upgrade instead of a runtime trust decision made by the bundle being verified.</div>
+    </div>
+  </section>
+
+  <section id="authorisation">
+    <div class="wrap">
+      <h2><span class="num">05</span>Authorisation: who said yes?</h2>
+      <p>Integrity and authorisation are different questions, and the verifier reports them separately. A bundle can be perfectly intact — every signature, path and anchor valid — while proving nothing about whether the principal agreed. The first line of the report is the integrity verdict; the second is the <strong>authorisation tier</strong>:</p>
+      <table>
+        <tr><th>Tier</th><th>Meaning</th></tr>
+        <tr><td><code>verified</code></td><td>The mandate, delegation and consent are signed by keys the <em>relying party</em> has pinned to the named principal, for that role and time window.</td></tr>
+        <tr><td><code>unauthenticated</code></td><td>The documents carry valid signatures, but by keys nobody has vouched for. Anyone can generate a key, so this proves consistency, not identity.</td></tr>
+        <tr><td><code>recorder_attested</code></td><td>A document is signed with a recorder key. The recorder observed it; that is never treated as the principal's authorisation.</td></tr>
+        <tr><td><code>absent</code></td><td>An authorising document is missing or unsigned.</td></tr>
+      </table>
+      <p>The sample bundles on <a href="/verify">/verify</a> report <code>unauthenticated</code>, and that is correct: their demo keys are not pinned to any real principal. Reaching <code>verified</code> requires the relying party to supply its own signer pins: the <code>trusted_signers</code> option of <code>verifyDisputeBundle</code> in <code>@sheafhq/verify</code>, or <code>--signers pins.json</code> on the repository's <code>sheaf dispute verify</code> CLI, where <code>--require-verified-authorisation</code> makes anything below <code>verified</code> a failure. Sheaf does not ship principal keys, and the browser verifier has no pin input yet.</p>
+      <div class="note">Why this matters: an earlier version of the local export signed principal documents with the recorder's own key, and the verifier accepted that as complete authorisation. Both were fixed (2026-11-17); the bundle produced by the old code is kept as a regression fixture and is now reported as recorder-attested.</div>
+      <p>Binding keys to real organisations and agents — identities with key rotation and recovery, scoped and attenuated delegations, revocation, and supplier-side verification — is the subject of the Sheaf Authority Protocol, which is in design and early implementation and not part of this release.</p>
+    </div>
+  </section>
+
+  <section id="simulation">
+    <div class="wrap">
+      <h2><span class="num">06</span>Run It Yourself: the Reference Simulation</h2>
+      <p>The architecture is exercised end to end by a reference simulation that runs on a single machine with no cloud services. A buyer agent is told to purchase a &euro;200 dataset and, if that fails, a &euro;100 one. A policy firewall at the MCP boundary blocks the &euro;200 call before it reaches the merchant and allows the &euro;100 purchase. Both decisions, the denial as well as the sale, are signed by the recorder Worker running locally, hash-chained, and anchored on a local EVM chain (anvil) standing in for Base.</p>
+      <p>An independent notary then audits the exported evidence bundle offline. It has only the bundle, the pinned recorder key and anchorer, and an RPC for the anchor chain. It re-checks every signature, Merkle path and anchor, proves the session is complete rather than a selected subset, and re-evaluates the policy against the disclosed inputs to confirm each recorded decision. The same run feeds the notary six forged variants of the bundle (a hidden denial, a dropped close event, a rewritten decision, an altered amount, a substituted policy, an unset enforcement flag), and every one must be rejected.</p>
+      <pre><code>git clone https://github.com/sheafhq/sheaf.git
+cd sheaf
+npm install &amp;&amp; npm run sim</code></pre>
+      <p>Requirements: <strong>Node.js 22.12+</strong> and <a href="https://book.getfoundry.sh/getting-started/installation">Foundry</a> (<code>anvil</code>). The run prints a Notary Certificate and exits 0 only if the honest bundle is accepted and every forgery rejected. It has been tested from a fresh clone on Linux (including WSL); Windows and macOS launchers are included. Details: <a href="https://github.com/sheafhq/sheaf/tree/main/simulation">simulation/README</a>.</p>
+      <div class="note">The simulation tests the claims in this document rather than mocking them: the recorder and its anchoring code are the same Worker source that runs in production, the firewall is the published @sheafhq/mcp-recorder 0.3.0, and the notary builds on @sheafhq/verify.</div>
+    </div>
+  </section>
+
+  <section id="limitations">
+    <div class="wrap">
+      <h2><span class="num">07</span>Limitations: what Sheaf does not prove</h2>
+      <ul>
+        <li><strong>Which agent acted.</strong> <code>event.actor</code> is a label supplied by the client, not an authenticated identity. Sheaf proves what crossed the boundary it recorded, not who was on the other side.</li>
+        <li><strong>Exact event time.</strong> <code>event.ts</code> is client-supplied. The trustworthy bound is the anchor block: the event existed no later than that.</li>
+        <li><strong>Who authorised it</strong>, unless the relying party pins principal keys (<a href="#authorisation">section 05</a>).</li>
+        <li><strong>That nothing else happened.</strong> A bundle proves the disclosed range is contiguous, and the simulation's session open/close events prove a session is complete. Nothing proves the absence of actions that never passed through a recorder.</li>
+        <li><strong>That the recorder showed everyone the same history.</strong> Each anchor commits to a set of events, not to one head per chain, so a dishonest recorder could anchor two conflicting branches in different epochs. This is detectable only by comparing evidence; witness co-signing and per-chain head commitments are planned.</li>
+        <li><strong>That an action happened in the real world.</strong> A recorded MCP response proves what the server returned to the proxy, not that the order shipped or the payment settled.</li>
+        <li><strong>Trust in delivery of the browser verifier.</strong> The page is only as trustworthy as its delivery from sheafhq.io. For independence, build <code>dispute-verify.html</code> from the source or use the CLI.</li>
+      </ul>
+      <p>Sheaf is a Developer Preview. The recorder, verifier and simulation are open source and usable today; formats may still change, and versioned format changes are made so that old bundles keep verifying.</p>
+    </div>
+  </section>
+
+  <section id="standards">
+    <div class="wrap">
+      <h2><span class="num">08</span>Standards and Related Work</h2>
+      <p>Sheaf is designed with the following in mind. None of this is a certification or a conformance claim; read it as design intent.</p>
+      <ul>
+        <li><strong>EU AI Act, Article 12 (record-keeping):</strong> high-risk AI systems must technically allow the automatic recording of events over their lifetime. Sheaf produces such records in a form a third party can verify.</li>
+        <li><strong>RFC 8785 (JCS):</strong> deterministic JSON canonicalization for cross-platform signature verification. Used for every signed and hashed structure.</li>
+        <li><strong>Internet-Drafts on agent audit trails</strong> (individual submissions, not IETF standards): <a href="https://datatracker.ietf.org/doc/draft-cowles-volt/">VOLT</a> (Verifiable Operations Ledger and Trace: hash-chained records packaged as portable evidence bundles) and <a href="https://datatracker.ietf.org/doc/draft-cowles-ward/">WARD</a> (content-free hash-chain witnessing). Sheaf solves overlapping problems; it does not claim conformance.</li>
+        <li><strong>SOC 2 and ISO/IEC 42001:</strong> both ask for evidence of monitoring, integrity of processing and traceability of AI actions. Sheaf's records are cryptographic evidence an auditor can check rather than operator-curated exports.</li>
+      </ul>
+      <p class="note">This document describes protocol behaviour. It is not legal advice, and it does not replace a regulator's or card network's assessment of a specific dispute.</p>
+      <a class="back" href="/">← Back to Home</a>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>Sheaf — portable, cryptographically verifiable evidence for autonomous agents.</span>
+    <span><a href="/verify">Verifier</a> · <a href="https://github.com/sheafhq/sheaf">GitHub</a></span>
+  </div>
+</footer>
+</body>
+</html>
