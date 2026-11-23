@@ -40,10 +40,18 @@ had already gone to npm from a copy that didn't match production.
    (`npm test` + `npm run sim`), using `scripts/release/` (see its README).
    Releasable packages: `@sheafhq/mcp-recorder`, `@sheafhq/mcp-tools`,
    `@sheafhq/verify`. Never publish the root or `simulation/`.
-7. **Secrets never go in chat, files or commits.** Tokens and 2FA codes are
+7. **Stay anonymous.** Commit as `Sheaf <noreply@sheafhq.io>` (set
+   `git config user.name/user.email` in every copy). Never put personal names,
+   emails, usernames or local paths (`C:\Users\…`, `/home/…`) in files or
+   commit messages; private notes go in `claude/` (gitignored). On 2026-11-23
+   all history was rewritten to remove them (both `sheafhq` repos,
+   force-pushed; backups are kept outside the repo). Any copy made before then
+   must re-clone or `git fetch && git reset --hard origin/main`, and must never
+   push old history.
+8. **Secrets never go in chat, files or commits.** Tokens and 2FA codes are
    entered by the human in a popup dialog. The npm token is DPAPI-encrypted and
    used only through `scripts/release/publish.ps1`; never decrypt or print it.
-8. **Windows ARM64 can't run `wrangler`/`workerd`.** Build, test and deploy
+9. **Windows ARM64 can't run `wrangler`/`workerd`.** Build, test and deploy
    from WSL (Ubuntu). This tree's wrangler 4 needs **Node ≥ 22.12**: use
    `~/.local/node22`. `~/.local/node` (v20) is for `~/sheaf`.
    Deploy only through `scripts/deploy/deploy.ps1 -Mode check|dry-run|deploy`.
@@ -53,7 +61,7 @@ had already gone to npm from a copy that didn't match production.
    default `main:main`, `-DryRun` to test). It uses the DPAPI-stored GitHub
    token (`scripts/deploy/gh-token.ps1 -Save|-Status|-Clear`, expires
    2026-12-11); never decrypt or print it.
-9. **Leave a trail.** Add a `CHANGELOG.md` entry for anything user-visible,
+10. **Leave a trail.** Add a `CHANGELOG.md` entry for anything user-visible,
    and end with a handoff note: what changed, what's committed or pushed, what's
    deployed or published, and what's still open.
 
