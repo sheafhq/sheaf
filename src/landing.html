@@ -61,7 +61,7 @@ p strong{color:var(--text);font-weight:600}
 </head>
 <body>
 <main>
-  <div class="preview">Sheaf is currently in Developer Preview. All paid features are free until further notice. <a href="https://news.ycombinator.com/submit" target="_blank" rel="noopener">Join the Hacker News discussion.</a></div>
+  <div class="preview">Sheaf is in Developer Preview. The verifier, recorder and local firewall are free and MIT-licensed. Three heavy hosted endpoints are pay-per-call via x402 ($0.001–$0.01 in USDC).</div>
   <div class="eyebrow">SHEAF / EXECUTION RECORDER</div>
   <h1>Verifiable evidence for what an AI agent actually did.</h1>
   <p>
@@ -72,13 +72,14 @@ p strong{color:var(--text);font-weight:600}
   </p>
   <section class="sim" id="simulation">
     <h2>Watch the Machine Economy Run</h2>
-    <p>Don't just trust the documentation. Run the simulation on your own machine. <code>npm install &amp;&amp; npm run sim</code> spins up a local blockchain, a buyer agent, a merchant, and an independent notary. You will watch the firewall block a rogue €200 transaction, allow a valid €100 purchase, and cryptographically verify the entire session.</p>
-    <pre><code>npm install &amp;&amp; npm run sim</code></pre>
+    <p>Don't just trust the documentation. Run the simulation on your own machine (Node 22.12+ and Foundry's <code>anvil</code>). It spins up a local blockchain, a buyer agent, a merchant, and an independent notary. You will watch the firewall block a rogue €200 transaction, allow a valid €100 purchase, and verify the entire session. Then the notary rejects six forged versions of the log.</p>
+    <pre><code>git clone https://github.com/sheafhq/sheaf &amp;&amp; cd sheaf
+npm ci &amp;&amp; npm run sim</code></pre>
     <a href="https://github.com/sheafhq/sheaf/tree/main/simulation">Read the simulation docs →</a>
   </section>
   <section class="manifesto">
     <h2>A .sheaf file, or it didn't happen.</h2>
-    <p>In a perfect world, you could trust the receipt you get from a vendor or service provider. You wouldn't need to worry about edited logs, mutable databases, or changing model versions. But AI agents act at machine speed, and application logs are designed for debugging, not for legal disputes. Sheaf provides portable, cryptographically verifiable proof of what an agent saw and did. No trust required.</p>
+    <p>In a perfect world, you could trust the receipt you get from a vendor or service provider. You wouldn't need to worry about edited logs, mutable databases, or changing model versions. But AI agents act at machine speed, and application logs are designed for debugging, not for legal disputes. Sheaf records each tool call at the boundary, outside the agent, and gives you a portable file you can check yourself, without trusting the operator's logs or our servers. What it does not prove is written down too.</p>
     <a href="/how-it-works">Read How Sheaf Works →</a>
   </section>
   <div class="firewall">
@@ -96,7 +97,7 @@ p strong{color:var(--text);font-weight:600}
   <p class="meta">Ed25519 · RFC 8785 · Merkle epochs · Base L2 · MIT</p>
   <section class="waitlist" id="waitlist">
     <h2>Want to use Sheaf in production?</h2>
-    <p>Sheaf is currently in Developer Preview. The local firewall and verifier are free and open-source forever. If you need managed cloud anchoring, EU AI Act compliance reports, or enterprise dispute bundles, join the waitlist for the Pro tier.</p>
+    <p>Sheaf is currently in Developer Preview. The local firewall and verifier are free and open-source forever. If you would use a paid hosted tier, tell us what for and we'll email you when it exists.</p>
     <form id="waitlist-form" novalidate>
       <label for="wl-email">Email</label>
       <input id="wl-email" name="email" type="email" autocomplete="email" placeholder="you@company.com" required maxlength="254">
@@ -104,15 +105,15 @@ p strong{color:var(--text);font-weight:600}
       <select id="wl-use" name="tier_interest" required>
         <option value="" disabled selected>Use case…</option>
         <option value="local">Local firewall &amp; verifier</option>
-        <option value="compliance">EU AI Act compliance reports</option>
-        <option value="dispute">Enterprise dispute bundles</option>
+        <option value="compliance">Audit records for compliance work</option>
+        <option value="dispute">Dispute bundles at volume</option>
         <option value="other">Something else</option>
       </select>
       <input class="hp" name="website" type="text" tabindex="-1" autocomplete="off" aria-hidden="true">
       <button class="button" id="wl-submit" type="submit">Join the waitlist</button>
     </form>
     <p class="status" id="wl-status" role="status" aria-live="polite"></p>
-    <p class="fine">We only use your email to contact you about the Pro tier.</p>
+    <p class="fine">We only use your email to contact you about a paid tier.</p>
   </section>
 </main>
 <script>

@@ -2,6 +2,35 @@
 
 All notable changes to Sheaf packages and the recorder Worker.
 
+## 2026-11-23 — Pre-launch audit: what npm ships matches what the docs say
+
+Found by a fresh-clone audit before a public launch post.
+
+- **`@sheafhq/verify` 0.1.6.** `sheaf-verify` now verifies
+  `sheaf.dispute-bundle/1` and `/2` files, detected by `schema`. Before, it
+  returned `UNSUPPORTED_SCHEMA` on the site's own `sample-bundle.sheaf`; only
+  the unpublished root CLI could read it. Output and exit codes match
+  `sheaf dispute verify` (3 = `--offline`, anchor unconfirmed). New flags:
+  `--signers`, `--allow-unconfirmed-anchor`. Test: `test/verify-cli.test.mjs`.
+- **`@sheafhq/mcp-recorder` 0.4.0 and `@sheafhq/mcp-tools` 0.2.0 published.**
+  npm `latest` now has the canonical `sheaf.policy/1` firewall
+  (`wrap --local`). 0.3.0's `--local --wrap` with `sheaf-policy/1` is
+  retired; the simulation still pins 0.3.0. `--help` now works.
+- **`npm test` passes on a fresh clone.** A root `postinstall` installs
+  `packages/s3-gateway`'s dependencies. The browser parity test falls back to
+  `CHROME_PATH`, installed Chrome, or Playwright's Chromium.
+- **Docs.** README rewritten around what npm actually ships. The `sheaf` CLI is
+  clone-and-build (`npm run build:sheaf`, `node dist-cli/cli.js`); `npx sheaf`
+  fetches an unrelated npm package. The order is `local sync` → `export` →
+  verify, and sync is x402-paid. Unverifiable citations (AHE, NHE, AEGIS,
+  GuardClaw, placeholder links) removed; VOLT and WARD linked as individual
+  Internet-Drafts. Worker and Stripe setup moved to `docs/DEVELOPMENT.md`.
+- **Site.** The banner no longer says every paid feature is free (x402
+  endpoints still charge). It no longer links to HN's submit page. The sim
+  command includes `git clone`. "No trust required" and the "EU AI Act
+  compliance reports" promise are gone. The release status on How Sheaf Works
+  reflects 0.4.0.
+
 ## 2026-11-20 — "Technical Whitepaper" becomes "How Sheaf Works"
 
 The document is now a technical overview at `/how-it-works`. `/whitepaper`

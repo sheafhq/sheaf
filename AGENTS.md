@@ -72,9 +72,9 @@ There are **two independent "Sheaf Local" firewalls** in `@sheafhq/mcp-recorder`
 `sheaf.policy/1`) is canonical.** The `~/sheaf` simulation will be ported onto
 it, and the `sheaf-policy/1` engine in 0.3.0 retired. Don't build on
 `sheaf-policy/1`.
-Note that npm `latest` for `mcp-recorder`, `mcp-tools` and `verify` currently
-points at versions built from `~/sheaf` (0.3.0 / 0.1.3 / 0.1.3), while the
-production copy has 0.4.0 / 0.2.0 / 0.5.0 locally.
+As of 2026-11-23, npm `latest` is built from GitHub `main`: mcp-recorder
+0.4.0 (`sheaf.policy/1`), mcp-tools 0.2.0 and verify 0.1.6. `simulation/`
+still pins mcp-recorder 0.3.0 until it is ported.
 
 ## In design: Sheaf Authority Protocol (SAP)
 
