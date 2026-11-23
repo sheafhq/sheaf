@@ -2,6 +2,12 @@
 
 All notable changes to Sheaf packages and the recorder Worker.
 
+## 2026-11-23 — Metadata-only releases: verify 0.1.7, mcp-recorder 0.4.1, mcp-tools 0.2.1
+
+No code changes. Republished so npm's package-level maintainer contact
+shows the project address (`hello@sheafhq.io`). mcp-tools reports 0.2.1 in
+`serverInfo`.
+
 ## 2026-11-23 — Pre-launch audit: what npm ships matches what the docs say
 
 Found by a fresh-clone audit before a public launch post.

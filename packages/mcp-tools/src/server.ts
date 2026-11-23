@@ -204,7 +204,7 @@ async function handle(
       return ok(id, {
         protocolVersion: "2025-03-26",
         capabilities: { tools: {} },
-        serverInfo: { name: "sheaf-mcp-tools", version: "0.2.0" },
+        serverInfo: { name: "sheaf-mcp-tools", version: "0.2.1" },
       });
     case "tools/list":
       return ok(id, { tools: TOOL_DEFS });
