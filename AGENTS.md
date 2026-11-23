@@ -109,11 +109,21 @@ regression tests: `test/local-signing.test.mjs` and the S1 cases in
 Once both are merged and pushed, every agent should work from a fresh clone of
 `main` (or a branch of it) and this table should list only that.
 
+## Releasing from a clean clone (2026-11-23)
+
+`publish.sh` publishes the tree it lives in. To publish from pushed `main`,
+copy `publish.sh`/`publish.ps1` from `~/sheaf/scripts/release/` into a fresh
+clone's `scripts/release/` and run that copy. `packages/mcp-tools` has its own
+lockfile: run `npm ci` inside it first, or `prepublishOnly` fails with TS2307.
+Right after a publish, `npm view` can lag ~1 min, and a re-run may try to
+republish (npm refuses; harmless).
+
 ## Deploy log
 
 | When (UTC) | Version ID | From | What | Notes |
 |---|---|---|---|---|
 | 2026-11-17 | `41446b6b-afe6-4530-a7af-b78c87912522` | production copy → `~/deploy-staging/sheaf` | favicon (`/favicon.svg`, linked on landing/whitepaper/verifier) + whitepaper "Reference Simulation" | **Exception to rule 4**, approved by the human: deployed from uncommitted work. Pre-deploy diff showed live == tree apart from these additions. Smoke test passed (manifest, llms.txt, keys, chain/receipt pages, `/bundle` still 402). |
+| 2026-11-23 | `8091b6df-7a09-4139-a07d-b6105fdb33cd` | clean clone of pushed `main` `334a041` (`~/gate-sheaf`) | pre-HN audit: landing/how-it-works/llms.txt copy fixes; no Worker code, migration or binding changes | Rules 4-5 followed: live == `168c309` before deploy, == `main` after. Smoke: manifest, public key, sample bundle, `/whitepaper` 301, `/v1/anchor/local` 402. |
 
 Still open: commit + push this tree to `main`, port the simulation onto
 `sheaf.policy/1`, then add the landing "Watch the Machine Economy Run" section
