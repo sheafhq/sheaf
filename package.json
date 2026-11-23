@@ -10,6 +10,7 @@
   "scripts": {
     "postinstall": "npm ci --prefix packages/s3-gateway --no-audit --no-fund",
     "typecheck": "tsc --noEmit",
+    "build:sheaf": "npm run build:verify && npm run build:cli",
     "build:verify": "tsc -p packages/verify/tsconfig.json",
     "build:cli": "tsc -p tsconfig.cli.json",
     "build:authority": "tsc -p packages/authority/tsconfig.json",

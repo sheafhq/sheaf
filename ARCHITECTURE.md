@@ -1,18 +1,17 @@
 # Sheaf architecture
 
-This document specifies Sheaf's technical architecture against emerging agent-auditability standards. Everything stated as a contract is versioned and will remain backwards-compatible across spec revisions.
+This document specifies Sheaf's technical architecture. Everything stated as a contract is versioned and will remain backwards-compatible across spec revisions.
 
 ## Design requirements
 
-Derived from the convergent academic and IETF work on agent auditability:
 
-1. **Third-party recording, not self-reporting.** The recorder sits outside the agent's process. Agents do not log themselves; a proxy intercepts tool calls at the MCP boundary and emits records. (AEGIS)
-2. **Hash-chained event records.** Each event's canonical form hashes the previous event's hash, forming a chain. Any edit/delete/reorder/fork is detectable. (VOLT)
-3. **Merkle batching + compact inclusion proofs.** Events are rolled into epochs; only the 32-byte Merkle root is anchored on-chain. Inclusion proofs are O(log n) in epoch size. No event content touches the chain. (Agent Flight Recorder)
-4. **Canonical serialization (RFC 8785 JCS).** The same event serializes to identical bytes across OS and architecture. Signatures verify portably. (GuardClaw)
-5. **Content-optional, privacy-first.** Events carry metadata + hashes + content-addressed references, not raw payloads. Explicit redaction support. (NHE)
-6. **Semantic event fields.** Eight semantic fields per event — intent, actor, authority, tool, inputs_hash, outputs_hash, result, timestamp — plus an optional `kind` discriminator for control events. Forensic queries are precise. (AFR)
-7. **Agent-native interception at MCP.** The capture point is the tool-call boundary. Any MCP client/server pair can be instrumented transparently. (mcp-audit-otel, mcp-audit-proxy, GuardClaw)
+1. **Third-party recording, not self-reporting.** The recorder sits outside the agent's process. Agents do not log themselves; a proxy intercepts tool calls at the MCP boundary and emits records.
+2. **Hash-chained event records.** Each event's canonical form hashes the previous event's hash, forming a chain. Any edit, deletion or reordering within a disclosed range is detectable; a fork shown to different parties is not, without an external witness (see Limitations at https://sheafhq.io/how-it-works).
+3. **Merkle batching + compact inclusion proofs.** Events are rolled into epochs; only the 32-byte Merkle root is anchored on-chain. Inclusion proofs are O(log n) in epoch size. No event content touches the chain.
+4. **Canonical serialization (RFC 8785 JCS).** The same event serializes to identical bytes across OS and architecture. Signatures verify portably.
+5. **Content-optional, privacy-first.** Events carry metadata + hashes + content-addressed references, not raw payloads. Payloads are disclosed selectively as whole preimages; field-level redaction after signing is not supported in v1.
+6. **Semantic event fields.** Eight semantic fields per event — intent, actor, authority, tool, inputs_hash, outputs_hash, result, timestamp — plus an optional `kind` discriminator for control events. Forensic queries are precise.
+7. **Agent-native interception at MCP.** The capture point is the tool-call boundary. Any MCP client/server pair can be instrumented transparently.
 8. **Open verification.** Verifier is a library anyone can run offline against the public key + Base RPC. No dependency on Sheaf's servers to check a receipt.
 
 ## Event envelope v1
@@ -136,13 +135,8 @@ Explicit non-goals to avoid confusion:
 
 ## References
 
-- [IETF draft: VOLT](https://datatracker.ietf.org/doc/draft-volt/) (hash-chained log transport)
-- [IETF draft: AHE / NHE](https://datatracker.ietf.org/) (agent hash envelope, content-optional audit chain)
-- Agent Flight Recorder paper (2026)
-- AEGIS (2026) — third-party recording requirement
-- [GuardClaw](https://github.com/guardclaw) — out-of-process signing daemon reference
-- [mcp-audit-proxy](https://github.com/) — reference MCP interceptor
-- [mcp-audit-otel](https://github.com/) — SDK middleware for MCP TypeScript SDK
-- [RFC 8785: JCS](https://datatracker.ietf.org/doc/rfc8785/) — JSON canonicalization
-- EU AI Act Article 12 — automated logging requirements
-- ISO/IEC 42001 — AI management systems
+- [VOLT](https://datatracker.ietf.org/doc/draft-cowles-volt/) (Verifiable Operations Ledger and Trace), individual Internet-Draft, not an IETF standard: hash-chained operation records
+- [WARD](https://datatracker.ietf.org/doc/draft-cowles-ward/), individual Internet-Draft: content-free hash-chain witnessing
+- [RFC 8785: JCS](https://datatracker.ietf.org/doc/rfc8785/): JSON canonicalization
+- EU AI Act Article 12: record-keeping (automatic logging) for high-risk AI systems
+- ISO/IEC 42001: AI management systems

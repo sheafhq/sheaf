@@ -9,7 +9,7 @@ trusting Sheaf's servers.
 Canonical site: https://sheafhq.io/
 Verifier: https://sheafhq.io/verify
 GitHub: https://github.com/sheafhq/sheaf
-Technical whitepaper: https://sheafhq.io/whitepaper
+How Sheaf works (incl. limitations): https://sheafhq.io/how-it-works
 
 ## NPM packages
 
@@ -20,8 +20,22 @@ Technical whitepaper: https://sheafhq.io/whitepaper
 - `@sheafhq/mcp-tools` — MCP server exposing `sheaf_chain_head`,
   `sheaf_get_proof_for`, and `sheaf_verify_bundle`.
   Binary: `sheaf-mcp-tools`
+- `sheaf` CLI (repo root) — Dispute Bundle authoring, `local export`,
+  `local sync`. Not on npm: clone, `npm ci && npm run build:sheaf`, then run
+  `node dist-cli/cli.js`. Do NOT run `npx sheaf`; that is an unrelated package.
 - `packages/s3-gateway` in the repo — S3-compatible PUT gateway that records
   `s3.put` receipts. It is not published as an npm package yet.
+
+## Verify a bundle (fastest start)
+
+```bash
+curl -sO https://sheafhq.io/sample-bundle.sheaf
+npx @sheafhq/verify sample-bundle.sheaf
+```
+
+`sheaf-verify` detects `sheaf.dispute-bundle/1` by its `schema` field. Exit
+codes: 0 valid, 1 invalid, 2 usage/I-O error, 3 valid with `--offline` but
+anchor unconfirmed (pass `--allow-unconfirmed-anchor` to exit 0).
 
 ## Install and wrap an MCP server
 
@@ -48,15 +62,19 @@ JSON-RPC error with code `-32001` and write a `result: "blocked"` event.
 
 ## Export and verify a local ledger
 
+From a clone of the repo, after `npm ci && npm run build:sheaf`:
+
 ```bash
-sheaf local export --chain-dir ./.sheaf --case ./case.json --out bundle.sheaf
-sheaf local sync --chain-dir ./.sheaf
-sheaf dispute verify bundle.sheaf --rpc https://mainnet.base.org --trust ./.sheaf/trust.json
+node dist-cli/cli.js local sync   --chain-dir ./.sheaf
+node dist-cli/cli.js local export --chain-dir ./.sheaf --case ./case.json --out bundle.sheaf
+npx @sheafhq/verify bundle.sheaf --trust ./.sheaf/trust.json
 ```
 
-`local sync` posts a signed root request to `POST /v1/anchor/local`. Once
-anchored, the next `local export` includes the Base transaction and
-`anchor_mode: base`.
+Run `local sync` before `local export`. It posts a signed root request to
+`POST /v1/anchor/local` (x402, $0.01 USDC on Base; needs
+`SHEAF_PAYER_PRIVATE_KEY`). The export then includes the Base transaction and
+`anchor_mode: base`. Without sync, the bundle carries a local anchor and
+verifies only with `--offline`.
 
 ## Verify a remote receipt
 
@@ -105,11 +123,10 @@ required.
 
 ## Get an API key
 
-`POST https://sheafhq.io/v1/checkout` returns a Stripe Checkout URL for Sheaf
-Pro. After `checkout.session.completed`, the Worker generates an API key and
-emails it to the customer. If Stripe or email is not configured, the endpoint
-returns a structured `stripe_not_configured` / delivery-queued response rather
-than a fake checkout URL.
+`sheaf-mcp-recorder init` creates a hosted chain and API key with no signup.
+Sheaf is in Developer Preview: `POST https://sheafhq.io/v1/checkout` returns
+`{"status":"preview"}` and a waitlist link instead of a Stripe Checkout URL.
+The three x402 endpoints above are still pay-per-call.
 
 ## Machine-readable manifest
 

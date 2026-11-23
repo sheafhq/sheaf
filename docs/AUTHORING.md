@@ -3,7 +3,15 @@
 This is the merchant-facing workflow. You do not need to read the Sheaf source
 to produce a bundle.
 
-The CLI is `sheaf` (from the repo, `node dist-cli/cli.js` also works).
+The CLI is `sheaf`, from this repo; it is not on npm yet. Build it once:
+
+```bash
+git clone https://github.com/sheafhq/sheaf && cd sheaf
+npm ci && npm run build:sheaf
+alias sheaf="node $PWD/dist-cli/cli.js"
+```
+
+Don't run `npx sheaf`: it fetches an unrelated npm package of that name.
 
 ```text
 sheaf dispute init-case <directory>

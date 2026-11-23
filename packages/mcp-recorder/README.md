@@ -145,17 +145,20 @@ sheaf-mcp-recorder wrap --local \
 
 Blocked calls are recorded with `result: "blocked"` and return the same
 structured JSON-RPC policy error as remote enforcement. Export the ledger with
-the umbrella CLI:
+the `sheaf` CLI from the [repo](https://github.com/sheafhq/sheaf) (not on npm
+yet; `npm ci && npm run build:sheaf`, then `node dist-cli/cli.js`):
 
 ```bash
-sheaf local export --chain-dir ./.sheaf --case ./case.json --out bundle.sheaf
-sheaf local sync --chain-dir ./.sheaf
-sheaf dispute verify bundle.sheaf --rpc https://mainnet.base.org --trust ./.sheaf/trust.json
+node dist-cli/cli.js local sync   --chain-dir ./.sheaf
+node dist-cli/cli.js local export --chain-dir ./.sheaf --case ./case.json --out bundle.sheaf
+npx @sheafhq/verify bundle.sheaf --trust ./.sheaf/trust.json
 ```
 
-`local sync` posts a signed root request to `POST /v1/anchor/local`; the Worker
-anchors the root on Base and records the receipt in `local_anchors`. A subsequent
-export includes `anchor_mode: base`. See `docs/AUTHORING.md` §8.
+`local sync` posts a signed root request to `POST /v1/anchor/local` (x402,
+$0.01 USDC on Base); the Worker anchors the root on Base and records the
+receipt in `local_anchors`. Sync before export so the bundle includes
+`anchor_mode: base`; otherwise verify with `--offline`. See
+[`docs/AUTHORING.md`](../../docs/AUTHORING.md) §8.
 
 ## Autonomous x402 payments
 
@@ -187,7 +190,7 @@ USDC on Base. `@sheafhq/mcp-tools` exposes `sheaf_buy_bundle` and
 |---|---|---|---|
 | `SHEAF_CHAIN_ID` | **yes** | — | Stable identifier for this agent/session's event chain |
 | `SHEAF_ACTOR` | no | = `SHEAF_CHAIN_ID` | Written into every event's `actor` field |
-| `SHEAF_RECORDER_URL` | no | `https://sheaf-recorder.goldencalf.workers.dev` | Point at your own instance if self-hosting |
+| `SHEAF_RECORDER_URL` | no | `https://api.sheafhq.io` | Point at your own instance if self-hosting |
 | `SHEAF_CAPTURE_METHODS` | no | `tools/call,resources/read,sampling/createMessage` | Comma-separated JSON-RPC methods to intercept |
 | `SHEAF_DEBUG` | no | — | `1` to log every event to stderr |
 

@@ -1,226 +1,201 @@
 # Sheaf
 
-**Third-party execution recorder for AI agents.** Hash-chained, Merkle-anchored, independently verifiable receipts of every tool call an agent makes — captured at the MCP boundary, signed outside the agent's process, anchored on-chain for dispute resolution.
+**A third-party execution recorder for AI agents.** Sheaf sits at the MCP
+boundary, signs every tool call outside the agent's process, hash-chains the
+records, and anchors Merkle roots on Base L2. The result is a `.sheaf` file
+anyone can check offline, without trusting the operator's logs or Sheaf's
+servers.
 
-> **Status:** early; recorder core + verifier shipping first. See [ARCHITECTURE.md](./ARCHITECTURE.md) for the technical spec.
+> **Status:** Developer Preview. The verifier, the MCP recorder and the local
+> firewall are on npm and MIT-licensed. Read [How Sheaf works](https://sheafhq.io/how-it-works),
+> including what Sheaf does **not** prove, before relying on it.
 
-## Quickstart (LLM-ingestible)
-
-Use these exact package names and commands. Do not invent a Sheaf SDK; the
-interfaces are an MCP proxy, a verifier, and HTTP endpoints.
+## Try it in two minutes
 
 ```bash
-# 1. Install the recorder and verifier.
-npm install -g @sheafhq/mcp-recorder @sheafhq/verify
-
-# 2. Wrap any MCP server. The recorder is a transparent stdio proxy.
-export SHEAF_CHAIN_ID="my-agent-production"
-sheaf-mcp-recorder --wrap npx -y @modelcontextprotocol/server-filesystem .
+# 1. Verify a published sample bundle. No account, no clone.
+curl -sO https://sheafhq.io/sample-bundle.sheaf
+npx @sheafhq/verify sample-bundle.sheaf
 ```
 
-For a local-only firewall and ledger (no HTTP):
+It re-derives every hash, signature, Merkle proof and chain link, then reads
+the anchor transaction from a public Base RPC. Edit any field and it reports
+`NOT VALID` and exits `1`.
 
 ```bash
+# 2. Watch a firewall block an agent and catch forged logs (needs Foundry's anvil).
+git clone https://github.com/sheafhq/sheaf && cd sheaf
+npm ci && npm run sim
+```
+
+The simulation runs a local chain, a buyer agent, a merchant and an
+independent notary. The firewall blocks an over-budget purchase and allows a
+valid one. The notary then rejects six forged versions of the log, including
+one with the blocked attempt deleted and one with the deny rewritten as allow.
+See [`simulation/`](./simulation).
+
+## Use it
+
+### Local firewall and ledger (no network)
+
+```bash
+npm install -g @sheafhq/mcp-recorder @sheafhq/verify
+
 sheaf-mcp-recorder wrap --local \
   --policy ./policy.json \
   --chain-dir ./.sheaf \
-  --case ./case.json \
   -- npx -y @modelcontextprotocol/server-filesystem .
 ```
 
-```bash
-# 3. Export and verify a local ledger.
-sheaf local export --chain-dir ./.sheaf --case ./case.json --out bundle.sheaf
-sheaf local sync --chain-dir ./.sheaf
-sheaf dispute verify bundle.sheaf --rpc https://mainnet.base.org --trust ./.sheaf/trust.json
-```
+Every `tools/call` is checked against a
+[`sheaf.policy/1`](./schemas/sheaf.policy-1.schema.json) policy (ALLOW,
+BLOCK or REQUIRE_APPROVAL, with constraints on arguments) before it reaches
+the server. Allowed and blocked calls are both appended to a signed,
+hash-chained `.sheaf/ledger.jsonl`. No HTTP requests are made. Example
+policy: [`test/fixtures/dispute-walking/policy.json`](./test/fixtures/dispute-walking/policy.json).
+
+### Hosted recorder
 
 ```bash
-# 4. Verify a remote receipt/bundle.
-sheaf-verify receipt.json --rpc https://mainnet.base.org
+sheaf-mcp-recorder init        # creates a chain + API key in ./.sheaf/, no signup
+sheaf-mcp-recorder --wrap npx -y @modelcontextprotocol/server-filesystem .
 ```
+
+Events go to `https://api.sheafhq.io`, which chains them, batches them into
+Merkle epochs, and anchors each epoch root on Base.
+
+### Export and verify a Dispute Bundle
+
+Turning a ledger into a portable Dispute Bundle uses the `sheaf` CLI in this
+repo. It is not published to npm yet:
+
+```bash
+git clone https://github.com/sheafhq/sheaf && cd sheaf
+npm ci && npm run build:sheaf
+
+node dist-cli/cli.js local sync   --chain-dir ../.sheaf      # optional: anchor the root on Base
+node dist-cli/cli.js local export --chain-dir ../.sheaf --case ../case.json --out ../bundle.sheaf
+npx @sheafhq/verify ../bundle.sheaf --trust ../.sheaf/trust.json   # add --offline if you skipped sync
+```
+
+Run `sync` before `export`. A bundle exported before its root is anchored
+carries a local anchor and verifies only with `--offline`. `sync` calls a
+paid endpoint ($0.01 in USDC on Base via [x402](https://x402.org)). Set
+`SHEAF_PAYER_PRIVATE_KEY` to a funded Base wallet, or skip it. The case
+manifest, principal signatures and reason-code mapping are covered in
+[`docs/AUTHORING.md`](./docs/AUTHORING.md).
+
+### Library
 
 ```ts
-// 5. Library verification.
-import { verify } from "@sheafhq/verify";
-const result = await verify(bundle, {
-  base_rpc: "https://mainnet.base.org",
-  recorder_public_key_base64: "3HAltFwtHSZp83CLKYF/KKG2Ac4Se/YiD+AkfqCb+e8=",
-  expected_anchorer_address: "0x08A22c6899a8b2eccA4b2B752a89eD498d7b2100",
+import { verifyDisputeBundle, defaultTrustStore } from "@sheafhq/verify";
+
+const result = await verifyDisputeBundle(bundle, {
+  trust: defaultTrustStore(),            // pinned recorder keys + anchorers
+  base_rpc: "https://mainnet.base.org",  // omit for integrity-only
 });
 ```
 
 Machine-readable usage guide: <https://sheafhq.io/llms.txt>
 
-Stripe checkout / email secrets (set with `wrangler secret put`):
-`STRIPE_SECRET_KEY`, `STRIPE_PRICE_ID`, `STRIPE_WEBHOOK_SECRET`,
-`RESEND_API_KEY`, and optional `RESEND_FROM`. Without them,
-`POST /v1/checkout` returns `503 stripe_not_configured` rather than a fake
-checkout URL.
-
-## Test-mode Stripe checkout
-
-Production currently runs `PREVIEW_MODE=true`, so `/v1/checkout` returns the
-Developer Preview response. To exercise the real Stripe path locally, set
-`PREVIEW_MODE=false` in `.dev.vars`.
-
-```bash
-# 1. Local D1 schema.
-npx wrangler d1 migrations apply arca-events --local
-
-# 2. Local secrets (never commit .dev.vars).
-cat > .dev.vars <<'EOF'
-PREVIEW_MODE=false
-STRIPE_SECRET_KEY=sk_test_...
-STRIPE_PRICE_ID=price_...
-STRIPE_WEBHOOK_SECRET=whsec_...
-RESEND_API_KEY=re_...
-EOF
-
-# 3. Start the Worker on 8787.
-npx wrangler dev --port 8787
-
-# 4. In another terminal, forward Stripe test events.
-stripe login
-stripe listen --forward-to localhost:8787/v1/webhooks/stripe
-```
-
-Use the `whsec_...` printed by `stripe listen` as `STRIPE_WEBHOOK_SECRET`.
-Trigger the event with:
-
-```bash
-stripe trigger checkout.session.completed
-```
-
-Test cards in Stripe Checkout:
-
-- `4242 4242 4242 4242` — successful payment.
-- `4000 0000 0000 3220` — 3D Secure authentication required.
-- `4000 0000 0000 9995` — declined.
-
-After `checkout.session.completed`, the Worker creates a Pro account, generates
-an API key, and attempts Resend delivery. With no Resend key, the email is
-queued in `email_outbox`; inspect it with:
-
-```bash
-npx wrangler d1 execute arca-events --local \
-  --command "SELECT email, subject, created_at, error FROM email_outbox ORDER BY id DESC LIMIT 5"
-```
-
-Do not return the API key in the webhook response; it is only sent by email or
-queued in the outbox.
-
-x402 paid endpoints (USDC on Base):
-
-| Method | Path | Price |
-| --- | --- | --- |
-| `GET` | `/bundle/:chain_id/:seq` | $0.001 |
-| `POST` | `/v1/anchor/local` | $0.01 |
-| `POST` | `/v1/chains/:chain_id/export` | $0.01 |
-
-Autonomous agents use `createX402Payer` + `paidFetch` from
-`@sheafhq/mcp-recorder`; see `llms.txt` for the exact code.
-
-## The one-line thesis
-
-The incumbent audit architecture (OneTrust, Vanta, Drata, ServiceNow) assumes a human samples documents. That architecture does not survive contact with an agent that executes thousands of actions across six systems in a minute. Sheaf records every tool call at the boundary, binds intent-authority-execution-provenance into one record, proves the record with a hash chain and on-chain anchor, and makes the proof portable — independently verifiable by any third party without trusting the operator.
-
-## What's novel
-
-- **Interception at the MCP layer, not the vendor API layer.** The only point where you can bind what the agent *intended* to do to what it *actually* did, with proof of authority and provenance.
-- **Active policy enforcement at the boundary.** `sheaf.policy/1` can allow, block, or require approval before a tool call reaches the server; blocked attempts are still recorded, so the audit trail shows the agent tried to go out of bounds.
-- **Local-first mode for local LLMs.** `mcp-recorder wrap --local` enforces policy and writes a signed, chained `.sheaf/ledger.jsonl` with zero network calls; `sheaf local export` turns that ledger into the same portable Dispute Bundle.
-- **Evidence bundles as portable artifacts, not dashboard rows.** Any conformant verifier checks offline. No lock-in.
-- **Content-optional by design.** Receipts carry hashes and references, not raw payloads. Privacy-safe, archive-affordable, verification-cheap.
-- **Open verifier.** Verification requires only the published public key and the Base L2 anchor — no dependency on our servers. Receipts survive us.
-
-## Alignment with emerging standards
-
-Sheaf is implemented against the convergent set of academic and IETF work on AI-agent auditability:
-
-- **VOLT** (IETF draft) — hash-chained verifiable observation / log transport
-- **AHE** (Agent Hash Envelope) — signed envelope format
-- **NHE** (Content-Optional Audit Chain) — reference-and-hash storage model
-- **AEGIS** (academic, 2026) — third-party recording requirement
-- **GuardClaw** — out-of-process signing daemon pattern
-- **Agent Flight Recorder** (academic, 2026) — Merkle batching + on-chain anchor + 8-field semantic events
-- **RFC 8785 (JCS)** — deterministic JSON canonicalization for cross-platform signature compatibility
-- **EU AI Act Article 12 / ISO/IEC 42001** — legal and governance frameworks Sheaf receipts are shaped to satisfy
-
-## Architecture at a glance
+## How it works
 
 ```
 Agent runtime (Claude Desktop, Cursor, custom)
         │  MCP tool call (JSON-RPC)
         ▼
 ┌─────────────────────────────────────┐
-│  Interceptor (zero-code proxy or    │  @sheafhq/mcp-recorder
-│  SDK middleware)                    │  Captures intent / tool / args (hashed) /
-│                                     │  authority / result / timestamp
+│  @sheafhq/mcp-recorder              │  stdio proxy, outside the agent process
+│  policy check → sign → hash-chain   │  ALLOW / BLOCK / REQUIRE_APPROVAL
 └──────────┬──────────────────────────┘
-           │  signed event (JCS canonicalized)
+           │  signed arca/1 envelope (RFC 8785 JCS, Ed25519)
            ▼
 ┌─────────────────────────────────────┐
-│  Signing daemon                     │  Out-of-process; keys in KMS
-│  (enterprise tier)                  │  Agent has zero private-key exposure
-└──────────┬──────────────────────────┘
-           │  hash-chained record
-           ▼
-┌─────────────────────────────────────┐
-│  Sheaf recorder (hosted)             │  POST /events → chained + persisted
-│  Append-only; content-optional      │  GET /events/:chain/:idx for retrieval
+│  Local ledger or hosted recorder    │  append-only; hashes, not payloads
 └──────────┬──────────────────────────┘
            │  Merkle epoch root
            ▼
 ┌─────────────────────────────────────┐
-│  Base L2 anchor                     │  32-byte root + back-pointer on-chain
-│                                     │  No event content on-chain
+│  Base L2 anchor                     │  32-byte root on-chain, no content
 └─────────────────────────────────────┘
 
-Verification: any party with the disclosed payload + Merkle inclusion proof
-checks the record offline using @sheafhq/verify. No contact with Sheaf needed.
+Verification: bundle + Merkle inclusion proof + a Base RPC.
+No contact with Sheaf needed.
 ```
 
-## Packages (coming online incrementally)
-
-| Package | Purpose | Status |
-|---|---|---|
-| `arca` (this repo) | Hosted recorder, archive, Merkle anchor | 🚧 Phase 1-3 |
-| [`@sheafhq/verify`](./packages/verify) | Standalone offline verifier (npm + pypi) | 🚧 Phase 4 |
-| [`@sheafhq/mcp-recorder`](./packages/mcp-recorder) | MCP interceptor emitting events to the recorder | 🚧 Phase 5 |
-
-## Dispute Bundle authoring
-
-Landing page: [https://sheafhq.io](https://sheafhq.io)
-
-S3 gateway: [`packages/s3-gateway`](./packages/s3-gateway) — PUT proxy that hashes the body and records an `s3.put` receipt for every successful write.
-
-How Sheaf works (technical overview, including limitations): [https://sheafhq.io/how-it-works](https://sheafhq.io/how-it-works)
-
-Live verifier: [https://sheafhq.io/verify](https://sheafhq.io/verify)
-
-Sample bundle: [https://sheafhq.io/sample-bundle.sheaf](https://sheafhq.io/sample-bundle.sheaf)
-
-Agent Firewall sample: [https://sheafhq.io/sample-bundle-policy.sheaf](https://sheafhq.io/sample-bundle-policy.sheaf)
-
-See [`docs/AUTHORING.md`](./docs/AUTHORING.md) for the merchant workflow:
-
-```bash
-sheaf dispute init-case ./CB-2026-0042
-sheaf dispute validate --case ./CB-2026-0042/case.json
-sheaf dispute export --archive events.jsonl --case ./CB-2026-0042/case.json --out ./CB-2026-0042/bundle.sheaf
-sheaf dispute verify ./CB-2026-0042/bundle.sheaf --offline
-```
+- **Captured at the MCP boundary.** The proxy sees what the agent asked for
+  and what came back, so the record isn't something the agent wrote about
+  itself.
+- **Enforced at the boundary.** Blocked attempts are recorded too, so the
+  trail shows the agent tried to go out of bounds.
+- **Content-optional.** Envelopes carry hashes and references. Payloads are
+  disclosed selectively, as whole preimages, when a dispute needs them.
+- **Portable.** A `.sheaf` file verifies with the open-source verifier, the
+  [browser verifier](https://sheafhq.io/verify), or your own implementation of
+  the [spec](./ARCHITECTURE.md).
 
 ## Limitations
 
-- **Case-to-chain linkage is merchant-attested, not proven.** A Dispute Bundle can show that a mandate, a delegation, a payer consent record, and an execution window were signed and anchored. It cannot prove that those events correspond to the card-network transaction in the merchant's case file without the merchant's own order/PSP records. The verifier reports the evidence as it is, not as the merchant wishes it were.
-- **Field-level redaction is not supported in v1.** An `arca/1` envelope hash covers the whole `{v,event,chain}` subtree, and a payload hash covers the whole payload. Disclosure selects whole envelopes and whole payload preimages; it cannot hide an individual field after signing. Field-level redaction needs a new commitment at signing time (an `arca/2`-class change), not a post-hoc edit.
-- **Offline mode proves integrity, not anchor presence.** `verifyDisclosures(..., { mode: "dispute" })` without `base_rpc` recomputes every hash, signature, Merkle proof, chain link, and calldata encoding, but it cannot prove the anchor transaction exists on Base. Offline results say `anchor_tx_on_chain: null`; only an independent Base RPC (or a future trusted checkpoint/light-client design) can confirm on-chain presence.
+Sheaf proves that a recorder signed a given sequence of events and that a
+root covering them was anchored at a point in time. It does **not** prove:
 
-## Reference implementation
+- **Who the actor was.** The agent identifier is a label, not authenticated
+  identity. Principal signatures count only when the verifying party pins the
+  signer's key (`--signers`).
+- **The client-supplied timestamp.** Only the anchor's block time is
+  independent.
+- **Completeness beyond a session.** The recorder can show a session was
+  closed, not that the agent made no calls outside the proxy.
+- **That everyone saw the same history.** Without an external log, a
+  recorder could show different chains to different parties (split view).
+- **Real-world effects.** A recorded payment call is not proof the payment
+  settled.
+- **Case-to-chain linkage.** Linking events to a card-network case is the
+  merchant's assertion, not something Sheaf proves.
+- **Field-level redaction.** Disclosure is whole-envelope and whole-payload in
+  v1.
+- **Anchor presence when offline.** `--offline` proves integrity only.
+  Confirming the anchor needs a Base RPC.
 
-A live x402-paid demonstration using Sheaf's attestation primitive on prediction market data exists at [polymarket-odds-x402.goldencalf.workers.dev](https://polymarket-odds-x402.goldencalf.workers.dev) — Sheaf's public key currently also signs receipts for that service. That codebase stays online as a reference implementation of the pre-recorder attestation shape.
+## Related work
+
+Sheaf builds on, and is aligned with, published work on agent auditability.
+It does not claim conformance to any of these:
+
+- [**VOLT**](https://datatracker.ietf.org/doc/draft-cowles-volt/) (Verifiable
+  Operations Ledger and Trace) and [**WARD**](https://datatracker.ietf.org/doc/draft-cowles-ward/),
+  individual Internet-Drafts, not IETF standards: hash-chained records and
+  content-free witnessing.
+- **RFC 8785 (JCS)**: deterministic JSON canonicalization, so signatures
+  verify across platforms.
+- Academic work on third-party recording and Merkle-batched, on-chain-anchored
+  agent logs ("flight recorders").
+- **EU AI Act Article 12** (record-keeping) and **ISO/IEC 42001**. Sheaf
+  receipts can serve as logs under these. Sheaf is not a compliance product
+  and does not certify anything.
+
+## Packages
+
+| Package | Purpose | npm |
+|---|---|---|
+| [`@sheafhq/verify`](./packages/verify) | Zero-dependency verifier: receipts, disclosure sets, Dispute Bundles | ✅ |
+| [`@sheafhq/mcp-recorder`](./packages/mcp-recorder) | MCP stdio proxy: hosted recorder, local firewall and ledger | ✅ |
+| [`@sheafhq/mcp-tools`](./packages/mcp-tools) | MCP server exposing chain head, proofs and verification to agents | ✅ |
+| `sheaf` CLI (repo root) | Dispute Bundle authoring, local export and sync | clone |
+| [`packages/s3-gateway`](./packages/s3-gateway) | S3 PUT proxy that records an `s3.put` receipt per write | clone |
+| Recorder Worker (repo root) | Hosted recorder, archive, Merkle anchoring (Cloudflare Workers + D1) | — |
+
+## Development
+
+```bash
+npm ci            # also installs packages/s3-gateway's dependencies
+npm test          # all suites; the browser parity test needs Chrome or
+                  # `npx playwright install chromium`
+npm run sim       # end-to-end simulation (needs anvil from Foundry)
+```
+
+Running the recorder Worker locally, the x402-paid endpoints and test-mode
+Stripe checkout are covered in [`docs/DEVELOPMENT.md`](./docs/DEVELOPMENT.md).
 
 ## License
 
