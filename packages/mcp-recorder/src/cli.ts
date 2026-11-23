@@ -52,7 +52,23 @@ function die(msg: string, code = 2): never {
   process.exit(code);
 }
 
-if (argv[0] === "init") {
+if (argv[0] === "--help" || argv[0] === "-h" || argv[0] === "help") {
+  console.log(
+    "sheaf-mcp-recorder: signed, hash-chained receipts for every MCP tool call\n\n" +
+      "usage:\n" +
+      "  sheaf-mcp-recorder init\n" +
+      "      Create a hosted chain + API key in ./.sheaf/ (no signup).\n" +
+      "  sheaf-mcp-recorder --wrap <command> [args...]\n" +
+      "      Record every tool call to the hosted recorder (needs SHEAF_CHAIN_ID).\n" +
+      "  sheaf-mcp-recorder wrap --local --policy <policy.json> [--chain-dir ./.sheaf] [--case <case.json>] -- <command> [args...]\n" +
+      "      sheaf.policy/1 firewall: ALLOW / BLOCK / REQUIRE_APPROVAL before a call\n" +
+      "      reaches the server; writes a signed, chained ./.sheaf/ledger.jsonl with\n" +
+      "      no network calls.\n\n" +
+      "options: --chain-id <id>  --actor <name>  --debug\n" +
+      "docs: https://github.com/sheafhq/sheaf/tree/main/packages/mcp-recorder",
+  );
+  process.exit(0);
+} else if (argv[0] === "init") {
   runInit({
     recorderUrls: process.env.SHEAF_RECORDER_URL ? [process.env.SHEAF_RECORDER_URL] : DEFAULT_URLS,
     cwd: process.cwd(),
