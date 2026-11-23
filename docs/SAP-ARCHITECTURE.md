@@ -83,7 +83,7 @@ mandatory in v1.
 ## 1. Assessment of the current architecture
 
 Canonical tree: the production copy
-(`the Windows working copy`, uncommitted on
+(the Windows working copy, uncommitted on
 top of GitHub `main`; see `AGENTS.md`). Baseline 50/50 tests pass (disclose 19,
 evidence 9, disclosures 3, dispute 11, authoring 3, policy 4, local 1). The
 browser and s3-gateway suites were not run.

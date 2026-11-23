@@ -10,7 +10,7 @@ On 2026-11-17 we found two diverged, **uncommitted** copies of this repo:
 
 - `~/sheaf` (WSL): simulation, `@sheafhq/mcp-recorder` 0.3.0 `--local`
   (already published to npm), anchor fix
-- `the production working copy (Windows)`:
+- the production working copy (Windows):
   the source of what is LIVE (landing page, whitepaper, Stripe billing,
   dispute verifier, apex domain route) and its own firewall work
 
@@ -101,7 +101,7 @@ regression tests: `test/local-signing.test.mjs` and the S1 cases in
 
 | Path | Status (update when it changes) |
 |---|---|
-| `the production working copy (Windows)` | Production source as of 2026-11-17. Being reconciled with `~/sheaf`, then pushed to `main`. |
+| Production working copy (Windows; ask the human for the path) | Production source as of 2026-11-17. Being reconciled with `~/sheaf`, then pushed to `main`. |
 | `~/sheaf` (WSL) | Simulation + mcp-recorder 0.3.0 work, being merged into the copy above. Not a git repo; do not deploy from it. |
 
 | `~/deploy-staging/sheaf` (WSL) | Throwaway Linux build copy of the production source (rsync without `node_modules`/`.git`). Used for the 2026-11-17 deploy. Re-sync it from the production copy before every deploy; never edit it directly. |

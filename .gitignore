@@ -12,3 +12,6 @@ dist-cli/
 
 # test temp dirs (may hold local ledger keys)
 test/tmp-*/
+
+# private notes and briefs; never commit
+claude/
