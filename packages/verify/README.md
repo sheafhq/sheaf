@@ -102,16 +102,24 @@ verifier package.
 `sheaf.dispute-bundle/1` artifact and returns both `valid` and `complete`,
 a 14-entry `checks[]` array, and `evidence_gaps[]`.
 
-The CLI uses the same function:
+`sheaf-verify` detects dispute bundles by their `schema` field and uses the
+same function, so no flag is needed:
 
 ```bash
-sheaf dispute verify bundle.sheaf --rpc https://mainnet.base.org
-sheaf dispute verify bundle.sheaf --offline
+npx @sheafhq/verify bundle.sheaf                       # checks the anchor on Base
+npx @sheafhq/verify bundle.sheaf --rpc https://mainnet.base.org
+npx @sheafhq/verify bundle.sheaf --offline             # integrity only
+npx @sheafhq/verify bundle.sheaf --signers pins.json   # authenticate principals
 ```
 
-The browser verifier `dispute-verify.html` in the recorder repo uses the same
-formatter, so CLI and browser output cannot diverge. Offline mode leaves
-`anchor_on_base` null and exits `3` unless `--allow-unconfirmed-anchor` is set.
+Try it on the published sample:
+`curl -sO https://sheafhq.io/sample-bundle.sheaf && npx @sheafhq/verify sample-bundle.sheaf`.
+
+The recorder repo's `sheaf dispute verify` and the browser verifier
+`dispute-verify.html` use the same formatter, so all three print identical
+reports. Offline mode leaves `anchor_on_base` null and exits `3` unless
+`--allow-unconfirmed-anchor` is set. Exit codes: `0` valid, `1` invalid,
+`2` usage or I/O error, `3` valid offline but anchor unconfirmed.
 
 ### Claims are checked, never trusted (S2)
 

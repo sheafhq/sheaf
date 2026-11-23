@@ -6,15 +6,25 @@
 //   npx @sheafhq/verify --rpc https://base-mainnet.g.alchemy.com/v2/<key> bundle.sheaf
 //   cat bundle.sheaf | npx @sheafhq/verify -
 //
-// Exits 0 if the bundle is valid, 1 if not, 2 for argument / fetch errors.
+// sheaf.dispute-bundle/1 and /2 files are detected by their `schema` field
+// and verified with verifyDisputeBundle against the pinned trust store.
+//
+// Exits 0 if the bundle is valid, 1 if not, 2 for argument / fetch errors,
+// 3 for a dispute bundle verified --offline whose anchor is unconfirmed
+// (unless --allow-unconfirmed-anchor).
 
 import { readFileSync } from "node:fs";
 import {
   verify,
   verifyDisclosures,
+  verifyDisputeBundle,
+  formatDisputeVerification,
   defaultTrustStore,
+  DISPUTE_BUNDLE_SCHEMA,
+  DISPUTE_BUNDLE_SCHEMA_V2,
   type DisclosureSet,
   type TrustStore,
+  type TrustedSigner,
 } from "./index.js";
 
 const DEFAULT_RPC = "https://mainnet.base.org";
@@ -29,6 +39,8 @@ type Args = {
   dispute: boolean;
   offline: boolean;
   trustPath?: string;
+  signersPath?: string;
+  allowUnconfirmedAnchor: boolean;
 };
 
 function die(msg: string, code = 2): never {
@@ -45,10 +57,14 @@ function die(msg: string, code = 2): never {
       "  --recorder-url <url>          Recorder base URL to fetch /.well-known/sheaf-public-key",
       "                                (default: use key embedded in bundle; or https://sheaf-recorder.goldencalf.workers.dev)",
       "  --dispute                     Verify a sheaf-disclosure/1 set using the pinned trust store",
-      "  --offline                     Dispute mode only: skip the Base RPC anchor check",
-      "  --trust <path>                Dispute mode only: JSON {recorder_keys, anchorers}",
+      "  --offline                     Dispute/disclosure only: skip the Base RPC anchor check",
+      "  --trust <path>                Dispute/disclosure only: JSON {recorder_keys, anchorers}",
+      "  --signers <path>              Dispute bundles only: sheaf.trusted-signers/1 pins",
+      "  --allow-unconfirmed-anchor    Dispute bundles only: exit 0 (not 3) when --offline",
+      "                                integrity is valid but the anchor is unconfirmed",
       "",
-      "Legacy sheaf-bundle/1 behavior is unchanged. In --dispute mode the key and",
+      "sheaf.dispute-bundle/1 and /2 files are detected automatically (no flag needed).",
+      "Legacy sheaf-bundle/1 behavior is unchanged. In dispute mode the key and",
       "anchorer come from the pinned trust store; public_key_url is never fetched.",
     ].join("\n"),
   );
@@ -62,6 +78,7 @@ function parseArgs(argv: string[]): Args {
     anchorer: DEFAULT_ANCHORER,
     dispute: false,
     offline: false,
+    allowUnconfirmedAnchor: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const v = argv[i]!;
@@ -72,12 +89,12 @@ function parseArgs(argv: string[]): Args {
     else if (v === "--dispute") a.dispute = true;
     else if (v === "--offline") a.offline = true;
     else if (v === "--trust") a.trustPath = argv[++i] ?? die("--trust requires a path");
+    else if (v === "--allow-unconfirmed-anchor") a.allowUnconfirmedAnchor = true;
+    else if (v === "--signers") a.signersPath = argv[++i] ?? die("--signers requires a path");
     else if (v === "--help" || v === "-h") die("", 0);
     else rest.push(v);
   }
   if (rest.length !== 1) die("expected exactly one bundle path (or '-' for stdin)");
-  if (a.offline && !a.dispute) die("--offline requires --dispute");
-  if (a.trustPath && !a.dispute) die("--trust requires --dispute");
   if (a.dispute && (a.recorderKey || a.recorderUrl)) {
     die(
       "--recorder-key/--recorder-url are legacy-only; dispute mode uses the pinned --trust store",
@@ -207,9 +224,49 @@ function loadTrust(path: string): TrustStore {
   return t as TrustStore;
 }
 
+function loadSigners(path: string): TrustedSigner[] {
+  let doc: { schema?: unknown; signers?: unknown };
+  try {
+    doc = JSON.parse(readFileSync(path, "utf8"));
+  } catch (err) {
+    die(`could not read signers file: ${(err as Error).message}`);
+  }
+  if (doc?.schema !== "sheaf.trusted-signers/1" || !Array.isArray(doc.signers)) {
+    die(`${path} is not a sheaf.trusted-signers/1 document`);
+  }
+  return doc.signers as TrustedSigner[];
+}
+
+function isDisputeBundle(bundle: unknown): boolean {
+  const schema = (bundle as { schema?: unknown } | null)?.schema;
+  return schema === DISPUTE_BUNDLE_SCHEMA || schema === DISPUTE_BUNDLE_SCHEMA_V2;
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const bundle = (await readBundle(args.bundlePath)) as BundleShape;
+
+  if (isDisputeBundle(bundle)) {
+    if (args.recorderKey || args.recorderUrl) {
+      die("--recorder-key/--recorder-url do not apply to dispute bundles; use --trust");
+    }
+    const result = await verifyDisputeBundle(bundle, {
+      trust: args.trustPath ? loadTrust(args.trustPath) : defaultTrustStore(),
+      ...(args.offline ? {} : { base_rpc: args.rpc }),
+      ...(args.signersPath ? { trusted_signers: loadSigners(args.signersPath) } : {}),
+    });
+    process.stdout.write(formatDisputeVerification(result));
+    if (!result.valid) process.exit(1);
+    if (args.offline && !result.anchor_confirmed && !args.allowUnconfirmedAnchor) process.exit(3);
+    process.exit(0);
+  }
+
+  if (!args.dispute) {
+    if (args.offline) die("--offline requires --dispute or a dispute bundle");
+    if (args.trustPath) die("--trust requires --dispute or a dispute bundle");
+  }
+  if (args.signersPath) die("--signers applies to dispute bundles only");
+  if (args.allowUnconfirmedAnchor) die("--allow-unconfirmed-anchor applies to dispute bundles only");
 
   if (args.dispute) {
     const disclosure = bundle as unknown as DisclosureSet;
