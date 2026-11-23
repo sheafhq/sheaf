@@ -39,16 +39,13 @@ test.before(async () => {
       browser = await attempt();
       break;
     } catch (err) {
-      errors.push(String(err?.message ?? err).split("
-")[0]);
+      errors.push(String(err?.message ?? err).split("\n")[0]);
     }
   }
   if (!browser) {
     throw new Error(
       "no browser for the parity test. Install Google Chrome, set CHROME_PATH, " +
-        "or run `npx playwright install chromium`.
-  " + errors.join("
-  "),
+        "or run `npx playwright install chromium`.\n  " + errors.join("\n  "),
     );
   }
   context = await browser.newContext();
