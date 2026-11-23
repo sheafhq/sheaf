@@ -1,9 +1,9 @@
 // Browser verifier parity test.
 //
-// Chrome is launched separately with:
+// Prefers a Chrome launched separately with:
 //   chrome --headless=new --remote-debugging-port=9333 ...
-// and Playwright connects over CDP. This avoids relying on Playwright's
-// browser download and keeps the test's network boundary explicit.
+// that Playwright connects to over CDP, then falls back to CHROME_PATH,
+// installed Google Chrome, and Playwright's own Chromium.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -23,10 +23,33 @@ let browser;
 let context;
 
 test.before(async () => {
-  try {
-    browser = await chromium.connectOverCDP(CDP);
-  } catch {
-    browser = await chromium.launch({ headless: true, channel: "chrome" });
+  // 1. an already-running Chrome on CHROME_CDP; 2. CHROME_PATH; 3. installed
+  // Google Chrome; 4. Playwright's own Chromium (npx playwright install chromium).
+  const attempts = [
+    () => chromium.connectOverCDP(CDP),
+    ...(process.env.CHROME_PATH
+      ? [() => chromium.launch({ headless: true, executablePath: process.env.CHROME_PATH })]
+      : []),
+    () => chromium.launch({ headless: true, channel: "chrome" }),
+    () => chromium.launch({ headless: true }),
+  ];
+  const errors = [];
+  for (const attempt of attempts) {
+    try {
+      browser = await attempt();
+      break;
+    } catch (err) {
+      errors.push(String(err?.message ?? err).split("
+")[0]);
+    }
+  }
+  if (!browser) {
+    throw new Error(
+      "no browser for the parity test. Install Google Chrome, set CHROME_PATH, " +
+        "or run `npx playwright install chromium`.
+  " + errors.join("
+  "),
+    );
   }
   context = await browser.newContext();
 });
