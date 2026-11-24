@@ -132,6 +132,7 @@ republish (npm refuses; harmless).
 |---|---|---|---|---|
 | 2026-11-17 | `41446b6b-afe6-4530-a7af-b78c87912522` | production copy → `~/deploy-staging/sheaf` | favicon (`/favicon.svg`, linked on landing/whitepaper/verifier) + whitepaper "Reference Simulation" | **Exception to rule 4**, approved by the human: deployed from uncommitted work. Pre-deploy diff showed live == tree apart from these additions. Smoke test passed (manifest, llms.txt, keys, chain/receipt pages, `/bundle` still 402). |
 | 2026-11-23 | `8091b6df-7a09-4139-a07d-b6105fdb33cd` | clean clone of pushed `main` `334a041` (`~/gate-sheaf`) | pre-HN audit: landing/how-it-works/llms.txt copy fixes; no Worker code, migration or binding changes | Rules 4-5 followed: live == `168c309` before deploy, == `main` after. Smoke: manifest, public key, sample bundle, `/whitepaper` 301, `/v1/anchor/local` 402. |
+| 2026-11-24 | `68e34ab4-de5a-4f35-bcc5-7f2f909abac0` | clean clone of pushed `main` `62fefb8` (`~/gate-sheaf`) | `llms.txt` quickstart uses `npx @sheafhq/verify <url>` (verify 0.1.8); no Worker code changes | Pre-deploy: live == main except `llms.txt`. Post-deploy: all four pages == main; one-liner verifies the sample (anchor confirmed). |
 
 Still open: commit + push this tree to `main`, port the simulation onto
 `sheaf.policy/1`, then add the landing "Watch the Machine Economy Run" section
