@@ -126,6 +126,17 @@ lockfile: run `npm ci` inside it first, or `prepublishOnly` fails with TS2307.
 Right after a publish, `npm view` can lag ~1 min, and a re-run may try to
 republish (npm refuses; harmless).
 
+## MCP Registry (2026-11-24)
+
+`@sheafhq/mcp-tools` is listed as `io.sheafhq/mcp-tools` (HTTP domain
+verification; no personal GitHub login). To list a new version: publish the
+npm version first, wait until `registry.npmjs.org` serves it, bump
+`packages/mcp-tools/server.json` (both `version` fields), then from a clean
+clone run `scripts/deploy/mcp-registry.ps1 -Validate` and `-Publish -WslDir
+~/gate-sheaf/packages/mcp-tools`. The Ed25519 key is DPAPI-stored
+(`-Status` shows the public key); never decrypt or print it. `mcp-publisher`
+is installed in WSL at `~/.local/bin`.
+
 ## Deploy log
 
 | When (UTC) | Version ID | From | What | Notes |
@@ -133,6 +144,7 @@ republish (npm refuses; harmless).
 | 2026-11-17 | `41446b6b-afe6-4530-a7af-b78c87912522` | production copy → `~/deploy-staging/sheaf` | favicon (`/favicon.svg`, linked on landing/whitepaper/verifier) + whitepaper "Reference Simulation" | **Exception to rule 4**, approved by the human: deployed from uncommitted work. Pre-deploy diff showed live == tree apart from these additions. Smoke test passed (manifest, llms.txt, keys, chain/receipt pages, `/bundle` still 402). |
 | 2026-11-23 | `8091b6df-7a09-4139-a07d-b6105fdb33cd` | clean clone of pushed `main` `334a041` (`~/gate-sheaf`) | pre-HN audit: landing/how-it-works/llms.txt copy fixes; no Worker code, migration or binding changes | Rules 4-5 followed: live == `168c309` before deploy, == `main` after. Smoke: manifest, public key, sample bundle, `/whitepaper` 301, `/v1/anchor/local` 402. |
 | 2026-11-24 | `68e34ab4-de5a-4f35-bcc5-7f2f909abac0` | clean clone of pushed `main` `62fefb8` (`~/gate-sheaf`) | `llms.txt` quickstart uses `npx @sheafhq/verify <url>` (verify 0.1.8); no Worker code changes | Pre-deploy: live == main except `llms.txt`. Post-deploy: all four pages == main; one-liner verifies the sample (anchor confirmed). |
+| 2026-11-24 | `d0c60e63-af23-480b-a319-2580eda7e466` | clean clone of pushed `main` `3493ae5` (`~/gate-sheaf`) | `/.well-known/mcp-registry-auth` (MCP Registry domain proof, public key only) | Pre-deploy: all four pages == main. Proof returns 200, no redirect. Then `io.sheafhq/mcp-tools@0.2.2` published to the MCP Registry. |
 
 Still open: commit + push this tree to `main`, port the simulation onto
 `sheaf.policy/1`, then add the landing "Watch the Machine Economy Run" section
