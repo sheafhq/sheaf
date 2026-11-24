@@ -14,8 +14,7 @@ servers.
 
 ```bash
 # 1. Verify a published sample bundle. No account, no clone.
-curl -sO https://sheafhq.io/sample-bundle.sheaf
-npx @sheafhq/verify sample-bundle.sheaf
+npx @sheafhq/verify https://sheafhq.io/sample-bundle.sheaf
 ```
 
 It re-derives every hash, signature, Merkle proof and chain link, then reads

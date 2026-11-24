@@ -112,8 +112,11 @@ npx @sheafhq/verify bundle.sheaf --offline             # integrity only
 npx @sheafhq/verify bundle.sheaf --signers pins.json   # authenticate principals
 ```
 
-Try it on the published sample:
-`curl -sO https://sheafhq.io/sample-bundle.sheaf && npx @sheafhq/verify sample-bundle.sheaf`.
+Try it on the published sample (the argument can be a path, an `https://` URL,
+or `-` for stdin):
+`npx @sheafhq/verify https://sheafhq.io/sample-bundle.sheaf`. A downloaded
+bundle is treated exactly like a local file: dispute mode trusts only the
+verifier's pinned keys and anchorers.
 
 The recorder repo's `sheaf dispute verify` and the browser verifier
 `dispute-verify.html` use the same formatter, so all three print identical

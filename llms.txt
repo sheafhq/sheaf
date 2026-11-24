@@ -29,10 +29,10 @@ How Sheaf works (incl. limitations): https://sheafhq.io/how-it-works
 ## Verify a bundle (fastest start)
 
 ```bash
-curl -sO https://sheafhq.io/sample-bundle.sheaf
-npx @sheafhq/verify sample-bundle.sheaf
+npx @sheafhq/verify https://sheafhq.io/sample-bundle.sheaf
 ```
 
+The argument can be a file path, an `https://` URL, or `-` for stdin.
 `sheaf-verify` detects `sheaf.dispute-bundle/1` by its `schema` field. Exit
 codes: 0 valid, 1 invalid, 2 usage/I-O error, 3 valid with `--offline` but
 anchor unconfirmed (pass `--allow-unconfirmed-anchor` to exit 0).

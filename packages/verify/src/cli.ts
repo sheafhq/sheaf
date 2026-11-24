@@ -3,6 +3,7 @@
 //
 // Usage:
 //   npx @sheafhq/verify <bundle.sheaf>
+//   npx @sheafhq/verify https://sheafhq.io/sample-bundle.sheaf
 //   npx @sheafhq/verify --rpc https://base-mainnet.g.alchemy.com/v2/<key> bundle.sheaf
 //   cat bundle.sheaf | npx @sheafhq/verify -
 //
@@ -48,7 +49,7 @@ function die(msg: string, code = 2): never {
   console.error(
     [
       "",
-      "usage: sheaf-verify [options] <bundle.sheaf | - for stdin>",
+      "usage: sheaf-verify [options] <bundle.sheaf | https://... | - for stdin>",
       "",
       "options:",
       "  --rpc <url>                   Base mainnet RPC (default: " + DEFAULT_RPC + ")",
@@ -94,7 +95,7 @@ function parseArgs(argv: string[]): Args {
     else if (v === "--help" || v === "-h") die("", 0);
     else rest.push(v);
   }
-  if (rest.length !== 1) die("expected exactly one bundle path (or '-' for stdin)");
+  if (rest.length !== 1) die("expected exactly one bundle path, https:// URL, or '-' for stdin");
   if (a.dispute && (a.recorderKey || a.recorderUrl)) {
     die(
       "--recorder-key/--recorder-url are legacy-only; dispute mode uses the pinned --trust store",
@@ -103,14 +104,59 @@ function parseArgs(argv: string[]): Args {
   return { ...(a as Args), bundlePath: rest[0] as string };
 }
 
+const MAX_REMOTE_BYTES = 16 * 1024 * 1024;
+
+/** https:// anywhere; http:// only for loopback (tests, local recorders). */
+function isFetchableUrl(path: string): URL | null {
+  let url: URL;
+  try {
+    url = new URL(path);
+  } catch {
+    return null;
+  }
+  if (url.protocol === "https:") return url;
+  if (url.protocol === "http:" && ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)) {
+    return url;
+  }
+  if (url.protocol === "http:") die("refusing plain http:// for a non-local host; use https://");
+  return null;
+}
+
+// A downloaded bundle is treated exactly like a local file: dispute mode
+// trusts only the verifier's pinned keys and anchorers, never the bundle.
+async function fetchBundleText(url: URL): Promise<string> {
+  let res: Response;
+  try {
+    res = await fetch(url, { redirect: "follow", signal: AbortSignal.timeout(30_000) });
+  } catch (err) {
+    die(`could not download ${url.href}: ${(err as Error).message}`);
+  }
+  if (!res.ok) die(`could not download ${url.href}: HTTP ${res.status}`);
+  const declared = Number(res.headers.get("content-length") ?? "0");
+  if (declared > MAX_REMOTE_BYTES) die(`${url.href} is larger than 16 MB`);
+  const buf = Buffer.from(await res.arrayBuffer());
+  if (buf.length > MAX_REMOTE_BYTES) die(`${url.href} is larger than 16 MB`);
+  return buf.toString("utf8");
+}
+
 async function readBundle(path: string | "-"): Promise<unknown> {
   let text: string;
+  const url = path === "-" ? null : isFetchableUrl(path);
   if (path === "-") {
     const chunks: Buffer[] = [];
     for await (const c of process.stdin) chunks.push(c as Buffer);
     text = Buffer.concat(chunks).toString("utf8");
+  } else if (url) {
+    text = await fetchBundleText(url);
   } else {
-    text = readFileSync(path, "utf8");
+    try {
+      text = readFileSync(path, "utf8");
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "ENOENT") die(`file not found: ${path}`);
+      if (code === "EISDIR") die(`${path} is a directory, not a bundle file`);
+      die(`could not read ${path}: ${(err as Error).message}`);
+    }
   }
   try {
     return JSON.parse(text);

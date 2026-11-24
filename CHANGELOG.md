@@ -2,6 +2,19 @@
 
 All notable changes to Sheaf packages and the recorder Worker.
 
+## 2026-11-24 — `@sheafhq/verify` 0.1.8: verify a bundle by URL
+
+- `npx @sheafhq/verify https://sheafhq.io/sample-bundle.sheaf` works in one
+  command on every OS. Before, the quickstart used `curl -sO`, which fails in
+  Windows PowerShell (`curl` is an alias for `Invoke-WebRequest` there).
+- `https://` URLs are fetched with a 30 s timeout and a 16 MB cap. Plain
+  `http://` is refused except for loopback. A downloaded bundle gets no extra
+  trust: dispute mode still uses only the pinned keys and anchorers.
+- Clearer errors: `file not found: <path>` instead of a raw `ENOENT`, and
+  `HTTP <status>` for failed downloads.
+- Tests: URL parity with the file path, 404, non-local http refusal, missing
+  file (`test/verify-cli.test.mjs`).
+
 ## 2026-11-23 — Metadata-only releases: verify 0.1.7, mcp-recorder 0.4.1, mcp-tools 0.2.1
 
 No code changes. Republished so npm's package-level maintainer contact
