@@ -5,7 +5,13 @@
 // All three tools are READ-only against the Sheaf recorder. No wallet, no
 // settlement, no mutation. Safe to expose to any agent.
 
-import { verify } from "@sheafhq/verify";
+import {
+  verify,
+  verifyDisputeBundle,
+  defaultTrustStore,
+  DISPUTE_BUNDLE_SCHEMA,
+  DISPUTE_BUNDLE_SCHEMA_V2,
+} from "@sheafhq/verify";
 import { createX402Payer, paidFetch } from "./x402.js";
 
 export type ToolContext = {
@@ -235,6 +241,32 @@ export async function verifyBundle(
   if (!args.bundle || typeof args.bundle !== "object") {
     throw new Error("bundle (object) is required");
   }
+  // sheaf.dispute-bundle/1 and /2 (e.g. https://sheafhq.io/sample-bundle.sheaf):
+  // verified against the verifier's PINNED recorder keys and anchorers only;
+  // nothing inside the bundle is trusted.
+  const schema = (args.bundle as { schema?: unknown }).schema;
+  if (schema === DISPUTE_BUNDLE_SCHEMA || schema === DISPUTE_BUNDLE_SCHEMA_V2) {
+    const r = await verifyDisputeBundle(args.bundle, {
+      trust: defaultTrustStore(),
+      base_rpc: ctx.baseRpc,
+    });
+    return {
+      kind: "dispute-bundle",
+      valid: r.valid,
+      complete: r.complete,
+      authorisation: r.authorisation,
+      anchor_confirmed: r.anchor_confirmed,
+      anchor_mode: r.anchor_mode,
+      bundle_id: r.bundle_id,
+      code: r.code,
+      reason: r.reason,
+      checks: r.checks,
+      evidence_gaps: r.evidence_gaps,
+      warnings: r.warnings,
+      signatures: r.signatures,
+    };
+  }
+
   // Accept both sheaf-bundle/1 (paid /bundle endpoint) and the legacy
   // {envelope, inclusion_proof, anchor_tx_hash} shape used by the free
   // compose-it-yourself pattern.

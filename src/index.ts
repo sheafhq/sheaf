@@ -715,6 +715,16 @@ app.get("/badge/:slug", async (c) => {
   return c.body(svg);
 });
 
+// MCP Registry domain proof for the io.sheafhq/ namespace (HTTP verification).
+// Public key only; the private key is DPAPI-stored on the release machine and
+// used by scripts/deploy/mcp-registry.ps1. Rotate by changing this value.
+const MCP_REGISTRY_PUBLIC_KEY = "23bTG01/CRAwMRRsgKJq5MR233URDTbZJzK6xrdG6iI=";
+app.get("/.well-known/mcp-registry-auth", (c) => {
+  c.header("Content-Type", "text/plain; charset=utf-8");
+  c.header("Cache-Control", "public, max-age=300");
+  return c.body(`v=MCPv1; k=ed25519; p=${MCP_REGISTRY_PUBLIC_KEY}`);
+});
+
 app.get("/.well-known/sheaf-public-key", (c) => {
   c.header("Cache-Control", ONE_DAY_CACHE);
   return c.json({

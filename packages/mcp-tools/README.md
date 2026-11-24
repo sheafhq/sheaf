@@ -7,7 +7,7 @@ agent:
 | --- | --- |
 | `sheaf_chain_head` | Fetch the current head of a Sheaf chain (seq + hash). |
 | `sheaf_get_proof_for` | Fetch a Merkle inclusion proof + on-chain anchor reference for a specific event. |
-| `sheaf_verify_bundle` | Verify a Sheaf receipt bundle end-to-end (signature, Merkle inclusion, anchor tx). |
+| `sheaf_verify_bundle` | Verify a `.sheaf` dispute bundle or a receipt bundle end-to-end (signatures, Merkle inclusion, Base anchor). Dispute bundles are checked against pinned keys only. |
 | `sheaf_buy_bundle` | Pay $0.001 USDC on Base via x402 and buy the self-contained `/bundle` artifact. |
 | `sheaf_anchor_local` | Pay $0.01 USDC on Base and anchor a signed local Merkle root via `/v1/anchor/local`. |
 
@@ -22,6 +22,8 @@ For event *capture* (transparently recording every tool call an agent makes), us
 ```bash
 npm install -g @sheafhq/mcp-tools
 ```
+
+Listed in the official MCP Registry as `io.sheafhq/mcp-tools`.
 
 ## Use with Claude Desktop
 

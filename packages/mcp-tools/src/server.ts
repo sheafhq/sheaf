@@ -107,7 +107,7 @@ const TOOL_DEFS = [
     description: [
       "Verify a Sheaf receipt bundle end-to-end: signature, Merkle inclusion, and on-chain anchor. Pure read; makes one RPC call to Base to confirm the anchor transaction, no payment required.",
       "",
-      "WHEN TO USE: A counterparty, auditor, or upstream agent gave you a Sheaf bundle (version sheaf-bundle/1 from the paid /bundle endpoint, or the legacy {envelope, inclusion_proof, anchor_tx_hash} shape) and you need to confirm it is authentic and intact BEFORE acting on its contents. Common uses: gate agent workflows on independently verified evidence; log a receipt into your own audit trail only after validation; reject counterfeit or tampered bundles before they influence downstream decisions.",
+      "WHEN TO USE: A counterparty, auditor, or upstream agent gave you a Sheaf bundle (a sheaf.dispute-bundle/1 or /2 .sheaf file, version sheaf-bundle/1 from the paid /bundle endpoint, or the legacy {envelope, inclusion_proof, anchor_tx_hash} shape) and you need to confirm it is authentic and intact BEFORE acting on its contents. Common uses: gate agent workflows on independently verified evidence; log a receipt into your own audit trail only after validation; reject counterfeit or tampered bundles before they influence downstream decisions.",
       "",
       "WHEN NOT TO USE: You just want to look up what events exist — use sheaf_chain_head. You want a proof but don't have a bundle — use sheaf_get_proof_for. You want to CREATE a bundle for one of your own events — call GET /bundle/:chain_id/:seq on the recorder with an x402 payment.",
       "",
@@ -125,7 +125,7 @@ const TOOL_DEFS = [
         bundle: {
           type: "object",
           description:
-            "The Sheaf bundle to verify. Accepts the sheaf-bundle/1 shape (preferred) or the legacy { envelope, inclusion_proof, anchor_tx_hash } shape. Required.",
+            "The Sheaf bundle to verify, as parsed JSON. Accepts a sheaf.dispute-bundle/1 or /2 (.sheaf file; verified against pinned keys only, returns valid, complete, authorisation and 14 checks), the sheaf-bundle/1 shape, or the legacy { envelope, inclusion_proof, anchor_tx_hash } shape. Required.",
         },
         anchorer_address: {
           type: "string",
@@ -204,7 +204,7 @@ async function handle(
       return ok(id, {
         protocolVersion: "2025-03-26",
         capabilities: { tools: {} },
-        serverInfo: { name: "sheaf-mcp-tools", version: "0.2.1" },
+        serverInfo: { name: "sheaf-mcp-tools", version: "0.2.2" },
       });
     case "tools/list":
       return ok(id, { tools: TOOL_DEFS });

@@ -2,6 +2,19 @@
 
 All notable changes to Sheaf packages and the recorder Worker.
 
+## 2026-11-24 — `@sheafhq/mcp-tools` 0.2.2 and the MCP Registry
+
+- `sheaf_verify_bundle` verifies `sheaf.dispute-bundle/1` and `/2` (such as
+  `sample-bundle.sheaf`) with `verifyDisputeBundle`, against the verifier's
+  pinned keys and anchorers only. It returns `valid`, `complete`,
+  `authorisation`, the 14 checks and the evidence gaps. Before, agents got
+  "bundle shape not recognized".
+- Depends on `@sheafhq/verify` ^0.1.8.
+- `mcpName: io.sheafhq/mcp-tools` and `packages/mcp-tools/server.json` for the
+  official MCP Registry. The `io.sheafhq/` namespace is proven by HTTP domain
+  verification: the Worker serves `/.well-known/mcp-registry-auth`. Publish
+  with `scripts/deploy/mcp-registry.ps1` (DPAPI-stored Ed25519 key).
+
 ## 2026-11-24 — `@sheafhq/verify` 0.1.8: verify a bundle by URL
 
 - `npx @sheafhq/verify https://sheafhq.io/sample-bundle.sheaf` works in one
